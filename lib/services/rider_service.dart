@@ -275,7 +275,7 @@ class RiderService {
 
   //Complete pickup
 
-  Future<void> completePickup({
+  Future<Map<String, dynamic>> completePickup({
     required int accId,
     required int orderId,
     required int deliveryId,
@@ -297,6 +297,8 @@ class RiderService {
           response.data['message']?.toString() ?? 'Unable to complete pickup.',
         );
       }
+
+      return Map<String, dynamic>.from(response.data['data'] ?? {});
     } on DioException catch (e) {
       if (e.response?.data is Map && e.response?.data['message'] != null) {
         throw Exception(e.response?.data['message'].toString());

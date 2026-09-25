@@ -4,6 +4,7 @@ import '../../models/account.dart';
 import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_text_styles.dart';
+import '../refill/refill_history_screen.dart';
 import '../refill/refill_screen.dart';
 import '../refill/refilled_bottles_screen.dart';
 
@@ -44,6 +45,9 @@ class StationWorkerHomeScreen extends StatelessWidget {
 
             const SizedBox(height: AppSpacing.xl),
 
+            // --------------------------------------------------
+            // REFILL
+            // --------------------------------------------------
             _DashboardCard(
               icon: Icons.water_drop,
               title: 'Refill',
@@ -58,15 +62,37 @@ class StationWorkerHomeScreen extends StatelessWidget {
 
             const SizedBox(height: AppSpacing.md),
 
+            // --------------------------------------------------
+            // CURRENT REFILLED BOTTLES
+            // --------------------------------------------------
             _DashboardCard(
               icon: Icons.format_list_bulleted,
               title: 'Refilled Bottles',
-              description: 'View bottles that have been refilled.',
+              description: 'View bottles currently ready for delivery.',
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => const RefilledBottlesScreen(),
+                  ),
+                );
+              },
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            // --------------------------------------------------
+            // REFILL HISTORY
+            // --------------------------------------------------
+            _DashboardCard(
+              icon: Icons.history,
+              title: 'Refill History',
+              description: 'View all previous refill records.',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const RefillHistoryScreen(),
                   ),
                 );
               },

@@ -49,7 +49,9 @@ try {
     }
 
     /*
-     * Verify pickup belongs to rider and delivery.
+     * ---------------------------------------------------------
+     * 1. Verify pickup belongs to this rider and delivery.
+     * ---------------------------------------------------------
      */
 
     $pickupSql = "
@@ -103,11 +105,14 @@ try {
     }
 
     /*
-     * Count bottles actually delivered.
+     * ---------------------------------------------------------
+     * 2. Count bottles actually delivered.
+     * ---------------------------------------------------------
      */
 
     $deliveredSql = "
-        SELECT COUNT(DISTINCT BottleID) AS DeliveredCount
+        SELECT
+            COUNT(DISTINCT BottleID) AS DeliveredCount
 
         FROM order_delivery_transaction
 
@@ -126,16 +131,49 @@ try {
 
     $delivered = $deliveredStmt->fetch();
 
+    $deliveredCount =
+        (int) $delivered['DeliveredCount'];
+
+    if ($deliveredCount <= 0) {
+
+        http_response_code(400);
+
+        echo json_encode([
+            'success' => false,
+            'message' =>
+                'No delivered bottles were found for this delivery.'
+        ]);
+
+        exit;
+    }
+
     /*
-     * Count bottles picked up.
+     * ---------------------------------------------------------
+     * 3. Count ALL bottles picked up for this delivery.
+     *
+     *    IMPORTANT:
+     *    We count across the delivery, not only this PickUpID.
+     *
+     *    This allows:
+     *
+     *    Pickup #1 = 3
+     *    Pickup #2 = 2
+     *
+     *    Total = 5
+     * ---------------------------------------------------------
      */
 
     $pickedUpSql = "
-        SELECT COUNT(DISTINCT BottleID) AS PickedUpCount
+        SELECT
+            COUNT(DISTINCT dpt.BottleID) AS PickedUpCount
 
-        FROM delivery_pickup_transaction
+        FROM pickup p
 
-        WHERE PickUpID = :pickUpId
+        INNER JOIN delivery_pickup_transaction dpt
+            ON p.PickUpID = dpt.PickUpID
+
+        WHERE p.DeliveryID = :deliveryId
+          AND p.AccID = :accId
     ";
 
     $pickedUpStmt = $db->prepare(
@@ -143,29 +181,29 @@ try {
     );
 
     $pickedUpStmt->execute([
-        ':pickUpId' => $pickUpId
+        ':deliveryId' => $deliveryId,
+        ':accId' => $accId
     ]);
 
     $pickedUp = $pickedUpStmt->fetch();
 
-    $deliveredCount =
-        (int) $delivered['DeliveredCount'];
-
     $pickedUpCount =
         (int) $pickedUp['PickedUpCount'];
 
-    if ($pickedUpCount < $deliveredCount) {
+    /*
+     * ---------------------------------------------------------
+     * 4. Validate pickup quantity.
+     * ---------------------------------------------------------
+     */
+
+    if ($pickedUpCount <= 0) {
 
         http_response_code(400);
 
         echo json_encode([
             'success' => false,
             'message' =>
-                'Not all delivered bottles have been picked up.',
-            'data' => [
-                'delivered' => $deliveredCount,
-                'pickedUp' => $pickedUpCount
-            ]
+                'At least one bottle must be picked up before completing this pickup.'
         ]);
 
         exit;
@@ -178,21 +216,45 @@ try {
         echo json_encode([
             'success' => false,
             'message' =>
-                'Picked up bottle count exceeds delivered bottle count.'
+                'Picked up bottle count exceeds delivered bottle count.',
+            'data' => [
+                'delivered' => $deliveredCount,
+                'pickedUp' => $pickedUpCount
+            ]
         ]);
 
         exit;
     }
 
     /*
-     * Update pickup completion time.
+     * ---------------------------------------------------------
+     * 5. Calculate remaining bottles.
+     * ---------------------------------------------------------
+     */
+
+    $remainingCount =
+        $deliveredCount - $pickedUpCount;
+
+    /*
+     * ---------------------------------------------------------
+     * 6. Update pickup timestamp.
+     *
+     *    Partial pickup is valid.
+     *
+     *    We do NOT change DeliveryStatus here.
+     *
+     *    The delivery remains DELIVERED while bottles are
+     *    still outstanding for pickup.
+     * ---------------------------------------------------------
      */
 
     $db->beginTransaction();
 
     $updateSql = "
         UPDATE pickup
+
         SET PickUpDateTime = NOW()
+
         WHERE PickUpID = :pickUpId
           AND DeliveryID = :deliveryId
           AND AccID = :accId
@@ -208,15 +270,52 @@ try {
 
     $db->commit();
 
+    /*
+     * ---------------------------------------------------------
+     * 7. Return partial/full pickup status.
+     * ---------------------------------------------------------
+     */
+
+    if ($remainingCount > 0) {
+
+        echo json_encode([
+            'success' => true,
+            'message' =>
+                'Partial pickup completed successfully. '
+                . $remainingCount
+                . ' bottle'
+                . ($remainingCount === 1 ? '' : 's')
+                . ' remain to be picked up.',
+            'data' => [
+                'pickUpId' => $pickUpId,
+                'deliveryId' => $deliveryId,
+                'orderId' => $orderId,
+                'deliveredCount' => $deliveredCount,
+                'pickedUpCount' => $pickedUpCount,
+                'remainingCount' => $remainingCount,
+                'pickupCompleted' => false
+            ]
+        ]);
+
+        exit;
+    }
+
+    /*
+     * All delivered bottles have now been picked up.
+     */
+
     echo json_encode([
         'success' => true,
         'message' =>
-            'Bottle pickup completed successfully.',
+            'Pickup completed successfully. All delivered bottles have been picked up.',
         'data' => [
             'pickUpId' => $pickUpId,
             'deliveryId' => $deliveryId,
             'orderId' => $orderId,
-            'pickedUpCount' => $pickedUpCount
+            'deliveredCount' => $deliveredCount,
+            'pickedUpCount' => $pickedUpCount,
+            'remainingCount' => 0,
+            'pickupCompleted' => true
         ]
     ]);
 

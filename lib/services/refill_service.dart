@@ -13,25 +13,26 @@ class RefillService {
 
   Future<Bottle> verifyBottle(String bottleNumber) async {
     try {
-      final response = await _apiService.dio.get('api/bottles/get_bottles.php');
+      final response = await _apiService.dio.get(
+        'api/refill/verify_refill_bottle.php',
+        queryParameters: {'bottleNumber': bottleNumber},
+      );
 
       if (response.data['success'] != true) {
-        throw Exception('Unable to verify bottle.');
+        throw RefillException(
+          response.data['message']?.toString() ??
+              'This bottle cannot be refilled.',
+        );
       }
 
-      final List<dynamic> data = response.data['data'];
-
-      for (final item in data) {
-        final json = Map<String, dynamic>.from(item);
-
-        if (json['BottleNumber'].toString() == bottleNumber) {
-          return Bottle.fromJson(json);
-        }
-      }
-
-      throw Exception('Bottle $bottleNumber is not registered.');
+      return Bottle.fromJson(Map<String, dynamic>.from(response.data['data']));
     } on DioException catch (e) {
-      // Do not expose Dio details to the user.
+      final responseData = e.response?.data;
+
+      if (responseData is Map && responseData['message'] != null) {
+        throw RefillException(responseData['message'].toString());
+      }
+
       throw Exception(_getDioMessage(e));
     }
   }
@@ -68,7 +69,7 @@ class RefillService {
   }
 
   // ------------------------------------------------------------
-  // GET REFILLS
+  // GET CURRENT REFILLED BOTTLES
   // ------------------------------------------------------------
 
   Future<List<Refill>> getRefills() async {
@@ -78,6 +79,32 @@ class RefillService {
       if (response.data['success'] != true) {
         throw Exception(
           response.data['message'] ?? 'Unable to load refilled bottles.',
+        );
+      }
+
+      final List<dynamic> data = response.data['data'];
+
+      return data
+          .map((item) => Refill.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception(_getDioMessage(e));
+    }
+  }
+
+  // ------------------------------------------------------------
+  // GET REFILL HISTORY
+  // ------------------------------------------------------------
+
+  Future<List<Refill>> getRefillHistory() async {
+    try {
+      final response = await _apiService.dio.get(
+        'api/refill/get_refill_history.php',
+      );
+
+      if (response.data['success'] != true) {
+        throw Exception(
+          response.data['message'] ?? 'Unable to load refill history.',
         );
       }
 

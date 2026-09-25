@@ -194,7 +194,7 @@ try {
     /*
      * ---------------------------------------------------------
      * 4. Verify this exact bottle was delivered
-     *    for this customer/order/delivery.
+     *    for this order and delivery.
      * ---------------------------------------------------------
      */
 
@@ -242,11 +242,11 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 5. Check if bottle was already picked up
-     *    FOR THIS DELIVERY.
+     * 5. Check if this exact bottle was already picked up
+     *    for this delivery.
      *
-     *    This is intentionally NOT a global check.
-     *    Bottles are reusable.
+     *    This is NOT a global bottle check because bottles
+     *    are reusable.
      * ---------------------------------------------------------
      */
 
@@ -283,7 +283,7 @@ try {
         echo json_encode([
             'success' => false,
             'message' =>
-                'This bottle has already been picked up.'
+                'This bottle has already been picked up for this delivery.'
         ]);
 
         exit;
@@ -291,8 +291,18 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 6. Make sure we have not already reached the
-     *    required pickup quantity.
+     * 6. Count ALL bottles already picked up for this delivery.
+     *
+     *    This is the important part for partial pickup.
+     *
+     *    Example:
+     *
+     *    Delivered = 5
+     *    Already picked up = 3
+     *    Remaining = 2
+     *
+     *    The rider may continue scanning until the total
+     *    reaches 5.
      * ---------------------------------------------------------
      */
 
@@ -302,7 +312,7 @@ try {
 
         FROM pickup p
 
-        LEFT JOIN delivery_pickup_transaction dpt
+        INNER JOIN delivery_pickup_transaction dpt
             ON p.PickUpID = dpt.PickUpID
 
         WHERE p.DeliveryID = :deliveryId
@@ -323,14 +333,22 @@ try {
     $pickedUpCount = (int) $currentCount['PickedUpCount'];
     $requiredCount = (int) $delivery['Quantity'];
 
-    if ($pickedUpCount >= $requiredCount) {
+    $remainingBeforePickup =
+        $requiredCount - $pickedUpCount;
+
+    if ($remainingBeforePickup <= 0) {
 
         http_response_code(400);
 
         echo json_encode([
             'success' => false,
             'message' =>
-                'All required bottles have already been picked up.'
+                'All required bottles have already been picked up.',
+            'data' => [
+                'pickedUpQuantity' => $pickedUpCount,
+                'requiredQuantity' => $requiredCount,
+                'remainingQuantity' => 0
+            ]
         ]);
 
         exit;
@@ -339,6 +357,9 @@ try {
     /*
      * ---------------------------------------------------------
      * 7. Create or get pickup session
+     *
+     *    The existing pickup session is reused so multiple
+     *    partial scans can accumulate against the same delivery.
      * ---------------------------------------------------------
      */
 
@@ -350,6 +371,8 @@ try {
 
         WHERE DeliveryID = :deliveryId
           AND AccID = :accId
+
+        ORDER BY PickUpID ASC
 
         LIMIT 1
     ";
@@ -426,42 +449,87 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 9. Count picked up bottles
+     * 9. Count total picked up bottles AFTER this scan.
      * ---------------------------------------------------------
      */
 
     $countSql = "
-        SELECT COUNT(DISTINCT BottleID) AS PickedUpCount
+        SELECT
+            COUNT(DISTINCT dpt.BottleID) AS PickedUpCount
 
-        FROM delivery_pickup_transaction
+        FROM pickup p
 
-        WHERE PickUpID = :pickUpId
+        INNER JOIN delivery_pickup_transaction dpt
+            ON p.PickUpID = dpt.PickUpID
+
+        WHERE p.DeliveryID = :deliveryId
+          AND p.AccID = :accId
     ";
 
     $countStmt = $db->prepare($countSql);
 
     $countStmt->execute([
-        ':pickUpId' => $pickUpId
+        ':deliveryId' => $deliveryId,
+        ':accId' => $accId
     ]);
 
     $count = $countStmt->fetch();
 
     $pickedUpCount = (int) $count['PickedUpCount'];
 
+    $remainingQuantity =
+        $requiredCount - $pickedUpCount;
+
+    /*
+     * ---------------------------------------------------------
+     * 10. Update pickup timestamp.
+     *
+     *     This records the latest pickup activity.
+     * ---------------------------------------------------------
+     */
+
+    $updatePickupSql = "
+        UPDATE pickup
+
+        SET PickUpDateTime = NOW()
+
+        WHERE PickUpID = :pickUpId
+          AND DeliveryID = :deliveryId
+          AND AccID = :accId
+    ";
+
+    $updatePickupStmt = $db->prepare(
+        $updatePickupSql
+    );
+
+    $updatePickupStmt->execute([
+        ':pickUpId' => $pickUpId,
+        ':deliveryId' => $deliveryId,
+        ':accId' => $accId
+    ]);
+
     echo json_encode([
         'success' => true,
-        'message' => 'Bottle pickup recorded successfully.',
+        'message' =>
+            $remainingQuantity > 0
+                ? 'Bottle pickup recorded successfully. Some bottles remain to be picked up.'
+                : 'Bottle pickup recorded successfully. All bottles have now been picked up.',
         'data' => [
             'pickUpId' => $pickUpId,
             'bottleId' => $bottleId,
             'bottleNumber' => $bottle['BottleNumber'],
             'bottleType' => $bottle['BottleType'],
             'pickedUpQuantity' => $pickedUpCount,
-            'requiredQuantity' => $requiredCount
+            'requiredQuantity' => $requiredCount,
+            'remainingQuantity' => $remainingQuantity
         ]
     ]);
 
 } catch (PDOException $e) {
+
+    if ($db !== null && $db->inTransaction()) {
+        $db->rollBack();
+    }
 
     http_response_code(500);
 

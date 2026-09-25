@@ -9,6 +9,8 @@ import '../../theme/app_text_styles.dart';
 
 import 'payment_screen.dart';
 
+import '../../services/rider_service.dart';
+
 class DeliveryConfirmationScreen extends StatelessWidget {
   final Account account;
   final OrderDetails order;
@@ -20,6 +22,48 @@ class DeliveryConfirmationScreen extends StatelessWidget {
     required this.order,
     required this.scannedBottles,
   });
+
+  Future<void> _completeDelivery(BuildContext context) async {
+    try {
+      final riderService = RiderService();
+
+      await riderService.completeDelivery(
+        accId: account.accId,
+        orderId: order.orderId,
+        deliveryId: order.deliveryId,
+      );
+
+      if (!context.mounted) {
+        return;
+      }
+
+      Navigator.popUntil(context, (route) => route.isFirst);
+    } catch (e) {
+      if (!context.mounted) {
+        return;
+      }
+
+      String message = e.toString();
+
+      if (message.startsWith('Exception: ')) {
+        message = message.substring('Exception: '.length);
+      }
+
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Delivery Failed'),
+          content: Text(message),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +95,14 @@ class DeliveryConfirmationScreen extends StatelessWidget {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   onPressed: () async {
+                    if (order.paymentStatus == 'PAID') {
+                      // Already fully paid.
+                      // Do not open the payment screen.
+                      await _completeDelivery(context);
+                      return;
+                    }
+
+                    // UNPAID or PARTIALLY_PAID
                     await Navigator.push(
                       context,
                       MaterialPageRoute(

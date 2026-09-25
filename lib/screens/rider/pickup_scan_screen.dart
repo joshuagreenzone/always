@@ -45,6 +45,10 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       return;
     }
 
+    /*
+     * Do not allow more bottles than the original delivered
+     * quantity to be scanned in this pickup process.
+     */
     if (_scannedBottles.length >= widget.order.deliveredBottleCount) {
       return;
     }
@@ -112,11 +116,13 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
       final scanned = _scannedBottles.length;
 
-      if (scanned >= required) {
+      final remaining = required - scanned;
+
+      if (remaining == 0) {
         await _showMessage(
-          'Pickup Ready',
-          'All delivered bottles have been '
-              'scanned.',
+          'All Bottles Scanned',
+          'All $required delivered bottles have '
+              'been scanned for pickup.',
         );
 
         return;
@@ -125,7 +131,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       await _showMessage(
         'Bottle Accepted',
         'Bottle: $bottleNumber\n\n'
-            'Picked up: $scanned / $required',
+            'Picked up: $scanned / $required\n'
+            'Remaining: $remaining',
       );
 
       if (!mounted) {
@@ -163,7 +170,12 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       return;
     }
 
-    if (_scannedBottles.length != widget.order.deliveredBottleCount) {
+    /*
+     * Partial pickup is allowed.
+     *
+     * The rider only needs to have scanned at least one bottle.
+     */
+    if (_scannedBottles.isEmpty) {
       return;
     }
 
@@ -172,7 +184,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     });
 
     try {
-      await _riderService.completePickup(
+      final result = await _riderService.completePickup(
         accId: widget.account.accId,
         orderId: widget.order.orderId,
         deliveryId: widget.order.deliveryId,
@@ -183,12 +195,40 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
         return;
       }
 
-      await _showMessage(
-        'Pickup Completed',
-        'All bottles from Order #'
-            '${widget.order.orderId} '
-            'have been picked up successfully.',
+      final delivered = widget.order.deliveredBottleCount;
+
+      final pickedUp = _scannedBottles.length;
+
+      final remaining = delivered - pickedUp;
+
+      /*
+       * If the backend returns the actual remaining count,
+       * prefer that value.
+       */
+      final returnedRemaining = int.tryParse(
+        result['remainingCount']?.toString() ?? '',
       );
+
+      final actualRemaining = returnedRemaining ?? remaining;
+
+      if (actualRemaining > 0) {
+        await _showMessage(
+          'Partial Pickup Completed',
+          '$pickedUp of $delivered bottles from '
+              'Order #${widget.order.orderId} '
+              'have been picked up.\n\n'
+              '$actualRemaining bottle'
+              '${actualRemaining == 1 ? '' : 's'} '
+              'remain to be picked up later.',
+        );
+      } else {
+        await _showMessage(
+          'Pickup Completed',
+          'All $delivered bottles from '
+              'Order #${widget.order.orderId} '
+              'have been picked up successfully.',
+        );
+      }
 
       if (!mounted) {
         return;
@@ -218,13 +258,10 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     return showDialog(
       context: context,
       barrierDismissible: false,
-
       builder: (_) {
         return AlertDialog(
           title: Text(title),
-
           content: Text(message),
-
           actions: [
             ElevatedButton(
               onPressed: () {
@@ -244,23 +281,24 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
     final scanned = _scannedBottles.length;
 
-    final complete = scanned == required && _pickUpId != null;
+    final remaining = required - scanned;
+
+    final canComplete = scanned > 0 && _pickUpId != null && !_isProcessing;
+
+    final allScanned = scanned == required;
 
     return Scaffold(
       appBar: AppBar(
         title: Text('Pickup #${widget.order.orderId}'),
         centerTitle: true,
       ),
-
       body: SafeArea(
         child: Column(
           children: [
             Padding(
               padding: const EdgeInsets.all(AppSizes.screenPadding),
-
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-
                 children: [
                   Text(
                     widget.order.customerName,
@@ -292,6 +330,13 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                     ],
                   ),
 
+                  const SizedBox(height: AppSpacing.xs),
+
+                  Text(
+                    'Remaining: $remaining',
+                    style: AppTextStyles.bodySecondary,
+                  ),
+
                   const SizedBox(height: AppSpacing.sm),
 
                   LinearProgressIndicator(
@@ -304,7 +349,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
             Expanded(
               child: Stack(
                 alignment: Alignment.center,
-
                 children: [
                   MobileScanner(
                     controller: _scannerController,
@@ -314,10 +358,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                   Container(
                     width: 250,
                     height: 250,
-
                     decoration: BoxDecoration(
                       border: Border.all(color: Colors.white, width: 3),
-
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
@@ -325,10 +367,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                   if (_isProcessing)
                     Container(
                       color: Colors.black45,
-
                       child: const Column(
                         mainAxisSize: MainAxisSize.min,
-
                         children: [
                           CircularProgressIndicator(color: Colors.white),
 
@@ -352,37 +392,28 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
             if (_scannedBottles.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.all(AppSizes.screenPadding),
-
                 child: SizedBox(
                   height: 90,
-
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
-
                     itemCount: _scannedBottles.length,
-
                     itemBuilder: (_, index) {
                       final bottle = _scannedBottles[index];
 
                       return Container(
                         margin: const EdgeInsets.only(right: AppSpacing.sm),
-
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 12,
                         ),
-
                         decoration: BoxDecoration(
                           border: Border.all(color: AppColors.success),
-
                           borderRadius: BorderRadius.circular(
                             AppSizes.cardRadius,
                           ),
                         ),
-
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
-
                           children: [
                             const Icon(
                               Icons.check_circle,
@@ -407,16 +438,13 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                 AppSizes.screenPadding,
                 AppSizes.screenPadding,
               ),
-
               child: SizedBox(
                 width: double.infinity,
-
                 child: ElevatedButton(
-                  onPressed: complete && !_isProcessing
-                      ? _completePickup
-                      : null,
-
-                  child: const Text('Complete Pickup'),
+                  onPressed: canComplete ? _completePickup : null,
+                  child: Text(
+                    allScanned ? 'Complete Pickup' : 'Complete Partial Pickup',
+                  ),
                 ),
               ),
             ),

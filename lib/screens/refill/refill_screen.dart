@@ -59,7 +59,7 @@ class _RefillScreenState extends State<RefillScreen> {
         _isLoading = false;
       });
 
-      await _showAlreadyRefilledDialog(e.message, value);
+      await _showInvalidBottleDialog(e.message, value);
     } catch (e) {
       if (!mounted) return;
 
@@ -101,7 +101,7 @@ class _RefillScreenState extends State<RefillScreen> {
         _isLoading = false;
       });
 
-      await _showAlreadyRefilledDialog(e.message, bottle.bottleNumber);
+      await _showInvalidBottleDialog(e.message, bottle.bottleNumber);
     } catch (e) {
       if (!mounted) return;
 
@@ -139,7 +139,9 @@ class _RefillScreenState extends State<RefillScreen> {
     );
   }
 
-  Future<void> _showAlreadyRefilledDialog(
+  //show invalid dialog
+
+  Future<void> _showInvalidBottleDialog(
     String message,
     String bottleNumber,
   ) async {
@@ -150,13 +152,13 @@ class _RefillScreenState extends State<RefillScreen> {
         return AlertDialog(
           title: const Row(
             children: [
-              Icon(Icons.info_outline, color: AppColors.warning),
+              Icon(Icons.cancel, color: AppColors.error),
               SizedBox(width: AppSpacing.sm),
-              Expanded(child: Text('Already Scanned')),
+              Expanded(child: Text('Invalid Bottle')),
             ],
           ),
           content: Text(
-            'This bottle has already been scanned.\n\n'
+            '$message\n\n'
             'Bottle: $bottleNumber',
           ),
           actions: [

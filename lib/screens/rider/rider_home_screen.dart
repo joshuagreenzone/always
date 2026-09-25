@@ -8,6 +8,7 @@ import '../login/login_screen.dart';
 
 import 'assigned_orders_screen.dart';
 import 'pickup_orders_screen.dart';
+import 'transaction_history_screen.dart';
 
 class RiderHomeScreen extends StatelessWidget {
   final Account account;
@@ -110,10 +111,16 @@ class RiderHomeScreen extends StatelessWidget {
 
             _DashboardCard(
               icon: Icons.history,
-              title: 'Delivery History',
-              description: 'View your completed deliveries.',
+              title: 'Transaction History',
+              description: 'View delivered and picked-up transactions.',
               onTap: () {
-                // Delivery history will be added later.
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        TransactionHistoryScreen(accId: account.accId),
+                  ),
+                );
               },
             ),
           ],
