@@ -32,12 +32,32 @@ try {
         ? trim($input['bottleNumber'])
         : '';
 
+    /*
+     * GPS LOCATION
+     *
+     * These values will later come from Flutter.
+     * They are currently optional so the endpoint can
+     * still be tested before the Flutter GPS changes.
+     */
+    $latitude = isset($input['latitude'])
+        ? (float) $input['latitude']
+        : null;
+
+    $longitude = isset($input['longitude'])
+        ? (float) $input['longitude']
+        : null;
+
+    $locationAccuracy = isset($input['accuracy'])
+        ? (float) $input['accuracy']
+        : null;
+
     if (
         $accId <= 0 ||
         $orderId <= 0 ||
         $deliveryId <= 0 ||
         $bottleNumber === ''
     ) {
+
         http_response_code(400);
 
         echo json_encode([
@@ -50,7 +70,7 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 1. Verify rider owns the delivery
+     * 1. VERIFY RIDER OWNS THE DELIVERY
      * ---------------------------------------------------------
      */
 
@@ -109,7 +129,22 @@ try {
         exit;
     }
 
-    if ($delivery['DeliveryStatus'] === 'COMPLETED') {
+    /*
+     * A delivery bottle can only be scanned while the
+     * delivery is active.
+     *
+     * Delivery statuses in the current schema are:
+     *
+     * ASSIGNED
+     * OUT_FOR_DELIVERY
+     * DELIVERED
+     * CANCELLED
+     *
+     * A bottle should not be scanned after delivery
+     * has already been completed.
+     */
+
+    if ($delivery['DeliveryStatus'] === 'DELIVERED') {
 
         http_response_code(400);
 
@@ -121,9 +156,21 @@ try {
         exit;
     }
 
+    if ($delivery['DeliveryStatus'] === 'CANCELLED') {
+
+        http_response_code(400);
+
+        echo json_encode([
+            'success' => false,
+            'message' => 'This delivery has been cancelled.'
+        ]);
+
+        exit;
+    }
+
     /*
      * ---------------------------------------------------------
-     * 2. Find the physical bottle
+     * 2. FIND THE PHYSICAL BOTTLE
      * ---------------------------------------------------------
      */
 
@@ -158,8 +205,7 @@ try {
 
         echo json_encode([
             'success' => false,
-            'message' =>
-                'Bottle not found.'
+            'message' => 'Bottle not found.'
         ]);
 
         exit;
@@ -188,9 +234,11 @@ try {
                 ', but the scanned bottle is ' .
                 $bottle['BottleType'] .
                 '.',
+
             'data' => [
                 'requiredBottleType' =>
                     $delivery['BottleType'],
+
                 'scannedBottleType' =>
                     $bottle['BottleType']
             ]
@@ -207,10 +255,13 @@ try {
 
     $duplicateSql = "
         SELECT ODTID
+
         FROM order_delivery_transaction
+
         WHERE OrderID = :orderId
           AND DeliveryID = :deliveryId
           AND BottleID = :bottleId
+
         LIMIT 1
     ";
 
@@ -228,8 +279,7 @@ try {
 
         echo json_encode([
             'success' => false,
-            'message' =>
-                'This bottle has already been scanned.'
+            'message' => 'This bottle has already been scanned.'
         ]);
 
         exit;
@@ -267,7 +317,7 @@ try {
 
         WHERE odt.BottleID = :bottleId
 
-          AND d.DeliveryStatus = 'COMPLETED'
+          AND d.DeliveryStatus = 'DELIVERED'
 
           AND NOT EXISTS (
 
@@ -313,10 +363,10 @@ try {
      * ---------------------------------------------------------
      * 6. CHECK IF BOTTLE IS ALREADY SCANNED FOR ANOTHER
      *    ACTIVE DELIVERY
-     * ---------------------------------------------------------
      *
      * This prevents the same bottle from being assigned to
      * two deliveries before either delivery is completed.
+     * ---------------------------------------------------------
      */
 
     $activeDeliverySql = "
@@ -333,7 +383,10 @@ try {
 
         WHERE odt.BottleID = :bottleId
 
-          AND d.DeliveryStatus = 'ASSIGNED'
+          AND d.DeliveryStatus IN (
+              'ASSIGNED',
+              'OUT_FOR_DELIVERY'
+          )
 
           AND NOT (
               odt.OrderID = :orderId
@@ -370,8 +423,8 @@ try {
      * ---------------------------------------------------------
      * 7. CHECK BOTTLE REFILL STATUS
      *
-     * A bottle must have a refill after its most recent pickup
-     * before it can be delivered again.
+     * A bottle must have a refill after its most recent
+     * pickup before it can be delivered again.
      * ---------------------------------------------------------
      */
 
@@ -384,7 +437,9 @@ try {
 
         WHERE r.BottleID = :bottleId
 
-        ORDER BY r.RefillDateTime DESC
+        ORDER BY
+            r.RefillDateTime DESC,
+            r.RefillID DESC
 
         LIMIT 1
     ";
@@ -411,7 +466,7 @@ try {
     }
 
     /*
-     * Find the latest completed delivery/pickup cycle.
+     * Find the latest pickup transaction for this bottle.
      */
 
     $latestPickupSql = "
@@ -426,7 +481,9 @@ try {
 
         WHERE dpt.BottleID = :bottleId
 
-        ORDER BY p.PickUpDateTime DESC
+        ORDER BY
+            p.PickUpDateTime DESC,
+            p.PickUpID DESC
 
         LIMIT 1
     ";
@@ -471,7 +528,9 @@ try {
 
     $countSql = "
         SELECT COUNT(*) AS ScannedCount
+
         FROM order_delivery_transaction
+
         WHERE OrderID = :orderId
           AND DeliveryID = :deliveryId
     ";
@@ -503,32 +562,121 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 9. INSERT SCANNED BOTTLE
+     * 9. INSERT DELIVERY TRANSACTION + SCAN EVENT
+     *
+     * Both operations are placed inside one database
+     * transaction.
+     *
+     * This guarantees that we do not create a delivery
+     * transaction without its corresponding scan event.
      * ---------------------------------------------------------
      */
 
-    $insertSql = "
-        INSERT INTO order_delivery_transaction
-        (
-            OrderID,
-            DeliveryID,
-            BottleID
-        )
-        VALUES
-        (
-            :orderId,
-            :deliveryId,
-            :bottleId
-        )
-    ";
+    $db->beginTransaction();
 
-    $insertStmt = $db->prepare($insertSql);
+    try {
 
-    $insertStmt->execute([
-        ':orderId' => $orderId,
-        ':deliveryId' => $deliveryId,
-        ':bottleId' => $bottleId
-    ]);
+        /*
+         * Insert the delivery transaction.
+         */
+
+        $insertSql = "
+            INSERT INTO order_delivery_transaction
+            (
+                OrderID,
+                DeliveryID,
+                BottleID
+            )
+            VALUES
+            (
+                :orderId,
+                :deliveryId,
+                :bottleId
+            )
+        ";
+
+        $insertStmt = $db->prepare($insertSql);
+
+        $insertStmt->execute([
+            ':orderId' => $orderId,
+            ':deliveryId' => $deliveryId,
+            ':bottleId' => $bottleId
+        ]);
+
+        $odtId = (int) $db->lastInsertId();
+
+        /*
+         * Record the physical bottle scan.
+         *
+         * ScanDateTime is generated by MariaDB using
+         * CURRENT_TIMESTAMP.
+         */
+
+        $scanEventSql = "
+            INSERT INTO bottle_scan_event
+            (
+                BottleID,
+                AccID,
+                EventType,
+                OrderID,
+                DeliveryID,
+                ODTID,
+                ScanDateTime,
+                Latitude,
+                Longitude,
+                LocationAccuracy
+            )
+            VALUES
+            (
+                :bottleId,
+                :accId,
+                'DELIVERY_SCAN',
+                :orderId,
+                :deliveryId,
+                :odtId,
+                CURRENT_TIMESTAMP,
+                :latitude,
+                :longitude,
+                :locationAccuracy
+            )
+        ";
+
+        $scanEventStmt = $db->prepare(
+            $scanEventSql
+        );
+
+        $scanEventStmt->execute([
+            ':bottleId' => $bottleId,
+            ':accId' => $accId,
+            ':orderId' => $orderId,
+            ':deliveryId' => $deliveryId,
+            ':odtId' => $odtId,
+            ':latitude' => $latitude,
+            ':longitude' => $longitude,
+            ':locationAccuracy' => $locationAccuracy
+        ]);
+
+        $scanEventId = (int) $db->lastInsertId();
+
+        /*
+         * Both inserts succeeded.
+         */
+
+        $db->commit();
+
+    } catch (PDOException $e) {
+
+        /*
+         * Something failed.
+         * Undo the delivery transaction and scan event.
+         */
+
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+
+        throw $e;
+    }
 
     /*
      * ---------------------------------------------------------
@@ -541,13 +689,18 @@ try {
     echo json_encode([
         'success' => true,
         'message' => 'Bottle scanned successfully.',
+
         'data' => [
             'bottleId' => $bottleId,
             'bottleNumber' => $bottle['BottleNumber'],
             'bottleTypeId' => (int) $bottle['BottleTypeID'],
             'bottleType' => $bottle['BottleType'],
+
             'requiredQuantity' => $requiredCount,
-            'scannedQuantity' => $newScannedCount
+            'scannedQuantity' => $newScannedCount,
+
+            'odtId' => $odtId,
+            'scanEventId' => $scanEventId
         ]
     ]);
 

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+
+import '../../models/account.dart';
 
 import '../../models/bottle.dart';
 import '../../services/refill_service.dart';
@@ -9,7 +12,9 @@ import '../../theme/app_spacing.dart';
 import '../../theme/app_text_styles.dart';
 
 class RefillScreen extends StatefulWidget {
-  const RefillScreen({super.key});
+  final Account account;
+
+  const RefillScreen({super.key, required this.account});
 
   @override
   State<RefillScreen> createState() => _RefillScreenState();
@@ -32,6 +37,37 @@ class _RefillScreenState extends State<RefillScreen> {
       _isScanning = true;
       _isLoading = false;
     });
+  }
+
+  Future<Position> _getCurrentLocation() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled) {
+      throw Exception(
+        'Location services are turned off. Please enable GPS and try again.',
+      );
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+
+      if (permission == LocationPermission.denied) {
+        throw Exception('Location permission was denied.');
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      throw Exception(
+        'Location permission is permanently denied. '
+        'Please enable it from the app settings.',
+      );
+    }
+
+    return await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
   }
 
   Future<void> _handleQrCode(String value) async {
@@ -81,7 +117,19 @@ class _RefillScreenState extends State<RefillScreen> {
     });
 
     try {
-      await _refillService.createRefill(bottleNumber: bottle.bottleNumber);
+      /*
+       * Get the physical location at the moment the
+       * refill is confirmed.
+       */
+      final position = await _getCurrentLocation();
+
+      await _refillService.createRefill(
+        accId: widget.account.accId,
+        bottleNumber: bottle.bottleNumber,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
+      );
 
       if (!mounted) return;
 
@@ -138,8 +186,6 @@ class _RefillScreenState extends State<RefillScreen> {
       },
     );
   }
-
-  //show invalid dialog
 
   Future<void> _showInvalidBottleDialog(
     String message,
@@ -223,26 +269,20 @@ class _RefillScreenState extends State<RefillScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.water_drop, size: 80, color: AppColors.primary),
-
             const SizedBox(height: AppSpacing.lg),
-
             const Text(
               'Bottle Refill',
               style: AppTextStyles.screenTitle,
               textAlign: TextAlign.center,
             ),
-
             const SizedBox(height: AppSpacing.sm),
-
             const Text(
               'Scan the QR code attached to the gallon '
               'to identify the bottle before refilling.',
               style: AppTextStyles.bodySecondary,
               textAlign: TextAlign.center,
             ),
-
             const SizedBox(height: AppSpacing.xl),
-
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -277,7 +317,6 @@ class _RefillScreenState extends State<RefillScreen> {
             _handleQrCode(value.trim());
           },
         ),
-
         Positioned(
           top: AppSpacing.lg,
           left: AppSpacing.lg,
@@ -296,7 +335,6 @@ class _RefillScreenState extends State<RefillScreen> {
             ),
           ),
         ),
-
         Center(
           child: Container(
             width: 250,
@@ -307,7 +345,6 @@ class _RefillScreenState extends State<RefillScreen> {
             ),
           ),
         ),
-
         Positioned(
           bottom: AppSpacing.xl,
           left: AppSpacing.lg,
@@ -334,19 +371,14 @@ class _RefillScreenState extends State<RefillScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const SizedBox(height: AppSpacing.sm),
-
             const Icon(Icons.check_circle, size: 70, color: AppColors.success),
-
             const SizedBox(height: AppSpacing.md),
-
             const Text(
               'Bottle Verified',
               style: AppTextStyles.screenTitle,
               textAlign: TextAlign.center,
             ),
-
             const SizedBox(height: AppSpacing.lg),
-
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(AppSpacing.lg),
@@ -361,13 +393,9 @@ class _RefillScreenState extends State<RefillScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-
                     const SizedBox(height: AppSpacing.lg),
-
                     _InfoItem(label: 'Bottle Type', value: bottle.bottleType),
-
                     const SizedBox(height: AppSpacing.lg),
-
                     _InfoItem(
                       label: 'Refill Price',
                       value: '₱${bottle.price.toStringAsFixed(2)}',
@@ -380,9 +408,7 @@ class _RefillScreenState extends State<RefillScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: AppSpacing.xl),
-
             SizedBox(
               height: AppSizes.buttonHeight,
               child: ElevatedButton.icon(
@@ -391,9 +417,7 @@ class _RefillScreenState extends State<RefillScreen> {
                 label: const Text('CONFIRM REFILL'),
               ),
             ),
-
             const SizedBox(height: AppSpacing.sm),
-
             SizedBox(
               height: AppSizes.buttonHeight,
               child: OutlinedButton(
@@ -419,25 +443,19 @@ class _RefillScreenState extends State<RefillScreen> {
               size: AppSizes.largeIconSize,
               color: AppColors.error,
             ),
-
             const SizedBox(height: AppSpacing.md),
-
             const Text(
               'Unable to Verify Bottle',
               style: AppTextStyles.sectionTitle,
               textAlign: TextAlign.center,
             ),
-
             const SizedBox(height: AppSpacing.sm),
-
             Text(
               _errorMessage!,
               style: AppTextStyles.bodySecondary,
               textAlign: TextAlign.center,
             ),
-
             const SizedBox(height: AppSpacing.lg),
-
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -465,9 +483,7 @@ class _InfoItem extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: AppTextStyles.bodySecondary),
-
         const SizedBox(height: AppSpacing.xs),
-
         Text(value, style: valueStyle ?? AppTextStyles.body),
       ],
     );

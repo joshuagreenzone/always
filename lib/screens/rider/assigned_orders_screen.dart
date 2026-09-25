@@ -8,6 +8,10 @@ import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_text_styles.dart';
 
+import '../../widgets/common/icon_badge.dart';
+import '../../widgets/common/info_row.dart';
+import '../../widgets/common/status_chip.dart';
+
 import 'order_details_screen.dart';
 
 class AssignedOrdersScreen extends StatefulWidget {
@@ -62,7 +66,7 @@ class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Assigned Orders'), centerTitle: true),
+      appBar: AppBar(title: const Text('Assigned Orders')),
       body: _buildBody(),
     );
   }
@@ -98,21 +102,20 @@ class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
       onRefresh: _loadOrders,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        children: const [
-          SizedBox(height: 180),
-          Icon(
-            Icons.local_shipping_outlined,
-            size: AppSizes.largeIconSize,
-            color: AppColors.textSecondary,
-          ),
-          SizedBox(height: AppSpacing.md),
+        children: [
+          const SizedBox(height: 160),
           Center(
-            child: Text(
-              'No assigned orders.',
-              style: AppTextStyles.sectionTitle,
+            child: IconBadge(
+              icon: Icons.local_shipping_outlined,
+              color: AppColors.textSecondary,
+              size: AppSizes.largeIconSize,
             ),
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.md),
+          Center(
+            child: Text('No assigned orders.', style: AppTextStyles.title),
+          ),
+          const SizedBox(height: AppSpacing.sm),
           Center(
             child: Text(
               'Assigned deliveries will appear here.',
@@ -131,21 +134,20 @@ class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSizes.screenPadding),
         children: [
-          const SizedBox(height: 120),
+          const SizedBox(height: 100),
 
-          const Icon(
-            Icons.error_outline,
-            size: AppSizes.largeIconSize,
-            color: AppColors.error,
+          Center(
+            child: IconBadge(
+              icon: Icons.error_outline,
+              color: AppColors.error,
+              size: AppSizes.largeIconSize,
+            ),
           ),
 
           const SizedBox(height: AppSpacing.md),
 
-          const Center(
-            child: Text(
-              'Unable to load orders',
-              style: AppTextStyles.sectionTitle,
-            ),
+          Center(
+            child: Text('Unable to load orders', style: AppTextStyles.title),
           ),
 
           const SizedBox(height: AppSpacing.sm),
@@ -188,9 +190,12 @@ class _OrderCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.receipt_long, size: 28),
+                const IconBadge(
+                  icon: Icons.receipt_long,
+                  color: AppColors.primary,
+                ),
 
-                const SizedBox(width: AppSpacing.sm),
+                const SizedBox(width: AppSpacing.md),
 
                 Expanded(
                   child: Text(
@@ -199,7 +204,10 @@ class _OrderCard extends StatelessWidget {
                   ),
                 ),
 
-                _StatusChip(label: order.paymentStatus),
+                StatusChip(
+                  label: order.paymentStatus,
+                  color: paymentStatusColor(order.paymentStatus),
+                ),
               ],
             ),
 
@@ -207,39 +215,34 @@ class _OrderCard extends StatelessWidget {
 
             const Divider(),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.xs),
 
-            _InfoRow(
+            InfoRow(
               icon: Icons.person_outline,
               label: 'Customer',
               value: order.customerName,
             ),
 
-            const SizedBox(height: AppSpacing.sm),
-
-            _InfoRow(
+            InfoRow(
               icon: Icons.water_drop_outlined,
               label: 'Bottle Type',
               value: order.bottleType,
             ),
 
-            const SizedBox(height: AppSpacing.sm),
-
-            _InfoRow(
+            InfoRow(
               icon: Icons.inventory_2_outlined,
               label: 'Quantity',
               value: '${order.quantity}',
             ),
 
-            const SizedBox(height: AppSpacing.sm),
-
-            _InfoRow(
+            InfoRow(
               icon: Icons.payments_outlined,
               label: 'Total',
               value: '₱${order.totalAmount.toStringAsFixed(2)}',
+              bold: true,
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.sm),
 
             SizedBox(
               width: double.infinity,
@@ -258,66 +261,6 @@ class _OrderCard extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _InfoRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 20, color: AppColors.textSecondary),
-
-        const SizedBox(width: AppSpacing.sm),
-
-        Text('$label:', style: AppTextStyles.bodySecondary),
-
-        const SizedBox(width: AppSpacing.sm),
-
-        Expanded(
-          child: Text(
-            value,
-            textAlign: TextAlign.end,
-            style: AppTextStyles.body,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  final String label;
-
-  const _StatusChip({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: AppColors.warning,
         ),
       ),
     );

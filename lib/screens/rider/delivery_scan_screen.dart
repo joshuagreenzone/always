@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../models/account.dart';
 import '../../models/order_details.dart';
@@ -69,6 +70,40 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
   }
 
   // ============================================================
+  // location method
+  // ============================================================
+
+  Future<Position> _getCurrentLocation() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled) {
+      throw Exception(
+        'Location services are turned off. Please enable GPS and try again.',
+      );
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+
+      if (permission == LocationPermission.denied) {
+        throw Exception('Location permission was denied.');
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      throw Exception(
+        'Location permission is permanently denied. Please enable it from the app settings.',
+      );
+    }
+
+    return await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+  }
+
+  // ============================================================
   // PROCESS BOTTLE
   // ============================================================
 
@@ -102,11 +137,16 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
       // SERVER VALIDATION
       // ========================================================
 
+      final position = await _getCurrentLocation();
+
       final result = await _riderService.scanDeliveryBottle(
         accId: widget.account.accId,
         orderId: widget.order.orderId,
         deliveryId: widget.order.deliveryId,
         bottleNumber: bottleNumber,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
       );
 
       if (!mounted) {

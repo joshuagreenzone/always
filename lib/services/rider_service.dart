@@ -75,6 +75,9 @@ class RiderService {
     required int orderId,
     required int deliveryId,
     required String bottleNumber,
+    required double latitude,
+    required double longitude,
+    required double accuracy,
   }) async {
     try {
       final response = await _apiService.dio.post(
@@ -84,6 +87,9 @@ class RiderService {
           'orderId': orderId,
           'deliveryId': deliveryId,
           'bottleNumber': bottleNumber,
+          'latitude': latitude,
+          'longitude': longitude,
+          'accuracy': accuracy,
         },
       );
 
@@ -245,6 +251,9 @@ class RiderService {
     required int orderId,
     required int deliveryId,
     required String bottleNumber,
+    required double latitude,
+    required double longitude,
+    required double accuracy,
   }) async {
     try {
       final response = await _apiService.dio.post(
@@ -254,6 +263,9 @@ class RiderService {
           'orderId': orderId,
           'deliveryId': deliveryId,
           'bottleNumber': bottleNumber,
+          'latitude': latitude,
+          'longitude': longitude,
+          'accuracy': accuracy,
         },
       );
 
@@ -267,6 +279,12 @@ class RiderService {
     } on DioException catch (e) {
       if (e.response?.data is Map && e.response?.data['message'] != null) {
         throw Exception(e.response?.data['message'].toString());
+      }
+
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.connectionError) {
+        throw Exception('Unable to connect to the server.');
       }
 
       throw Exception('Bottle pickup failed. Please try again.');

@@ -32,12 +32,34 @@ try {
         ? trim($input['bottleNumber'])
         : '';
 
+    /*
+     * GPS LOCATION
+     *
+     * Flutter will send these values when the bottle is scanned.
+     *
+     * They are optional for now so the PHP endpoint can still
+     * be tested before the Flutter GPS update is made.
+     */
+
+    $latitude = isset($input['latitude'])
+        ? (float) $input['latitude']
+        : null;
+
+    $longitude = isset($input['longitude'])
+        ? (float) $input['longitude']
+        : null;
+
+    $locationAccuracy = isset($input['accuracy'])
+        ? (float) $input['accuracy']
+        : null;
+
     if (
         $accId <= 0 ||
         $orderId <= 0 ||
         $deliveryId <= 0 ||
         $bottleNumber === ''
     ) {
+
         http_response_code(400);
 
         echo json_encode([
@@ -50,7 +72,7 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 1. Verify delivered delivery belongs to this rider
+     * 1. VERIFY DELIVERED DELIVERY BELONGS TO THIS RIDER
      * ---------------------------------------------------------
      */
 
@@ -60,10 +82,12 @@ try {
             d.OrderID,
             d.AccID,
             d.DeliveryStatus,
+
             o.Quantity,
             o.CustomerID,
             c.CustomerName,
             o.BottleTypeID,
+
             bt.BottleType
 
         FROM delivery d
@@ -111,6 +135,11 @@ try {
         exit;
     }
 
+    /*
+     * Pickup is only allowed after the delivery has been
+     * completed.
+     */
+
     if ($delivery['DeliveryStatus'] !== 'DELIVERED') {
 
         http_response_code(400);
@@ -126,7 +155,7 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 2. Find physical bottle
+     * 2. FIND PHYSICAL BOTTLE
      * ---------------------------------------------------------
      */
 
@@ -171,7 +200,7 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 3. Verify bottle type
+     * 3. VERIFY BOTTLE TYPE
      * ---------------------------------------------------------
      */
 
@@ -193,8 +222,8 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 4. Verify this exact bottle was delivered
-     *    for this order and delivery.
+     * 4. VERIFY THIS EXACT BOTTLE WAS DELIVERED
+     *    FOR THIS ORDER AND DELIVERY
      * ---------------------------------------------------------
      */
 
@@ -202,7 +231,8 @@ try {
         SELECT
             odt.ODTID,
             odt.OrderID,
-            odt.DeliveryID
+            odt.DeliveryID,
+            odt.BottleID
 
         FROM order_delivery_transaction odt
 
@@ -242,11 +272,8 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 5. Check if this exact bottle was already picked up
-     *    for this delivery.
-     *
-     *    This is NOT a global bottle check because bottles
-     *    are reusable.
+     * 5. CHECK IF THIS BOTTLE WAS ALREADY PICKED UP
+     *    FOR THIS DELIVERY
      * ---------------------------------------------------------
      */
 
@@ -291,18 +318,7 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 6. Count ALL bottles already picked up for this delivery.
-     *
-     *    This is the important part for partial pickup.
-     *
-     *    Example:
-     *
-     *    Delivered = 5
-     *    Already picked up = 3
-     *    Remaining = 2
-     *
-     *    The rider may continue scanning until the total
-     *    reaches 5.
+     * 6. COUNT ALL BOTTLES ALREADY PICKED UP
      * ---------------------------------------------------------
      */
 
@@ -331,6 +347,7 @@ try {
     $currentCount = $currentCountStmt->fetch();
 
     $pickedUpCount = (int) $currentCount['PickedUpCount'];
+
     $requiredCount = (int) $delivery['Quantity'];
 
     $remainingBeforePickup =
@@ -344,6 +361,7 @@ try {
             'success' => false,
             'message' =>
                 'All required bottles have already been picked up.',
+
             'data' => [
                 'pickedUpQuantity' => $pickedUpCount,
                 'requiredQuantity' => $requiredCount,
@@ -356,11 +374,13 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 7. Create or get pickup session
-     *
-     *    The existing pickup session is reused so multiple
-     *    partial scans can accumulate against the same delivery.
+     * 7. CREATE OR GET PICKUP SESSION
      * ---------------------------------------------------------
+     *
+     * We continue to reuse the existing pickup session.
+     *
+     * The individual scan time/location is now stored separately
+     * in bottle_scan_event.
      */
 
     $pickupSql = "
@@ -386,70 +406,192 @@ try {
 
     $pickup = $pickupStmt->fetch();
 
-    if ($pickup) {
+    /*
+     * ---------------------------------------------------------
+     * 8. START DATABASE TRANSACTION
+     * ---------------------------------------------------------
+     */
 
-        $pickUpId = (int) $pickup['PickUpID'];
+    $db->beginTransaction();
 
-    } else {
+    try {
 
-        $insertPickupSql = "
-            INSERT INTO pickup
+        /*
+         * Create pickup session if one does not already exist.
+         */
+
+        if ($pickup) {
+
+            $pickUpId = (int) $pickup['PickUpID'];
+
+        } else {
+
+            $insertPickupSql = "
+                INSERT INTO pickup
+                (
+                    DeliveryID,
+                    AccID,
+                    PickUpDateTime
+                )
+                VALUES
+                (
+                    :deliveryId,
+                    :accId,
+                    CURRENT_TIMESTAMP
+                )
+            ";
+
+            $insertPickupStmt = $db->prepare(
+                $insertPickupSql
+            );
+
+            $insertPickupStmt->execute([
+                ':deliveryId' => $deliveryId,
+                ':accId' => $accId
+            ]);
+
+            $pickUpId = (int) $db->lastInsertId();
+        }
+
+        /*
+         * -----------------------------------------------------
+         * 9. INSERT PICKUP TRANSACTION
+         * -----------------------------------------------------
+         */
+
+        $insertTransactionSql = "
+            INSERT INTO delivery_pickup_transaction
             (
-                DeliveryID,
-                AccID,
-                PickUpDateTime
+                PickUpID,
+                BottleID
             )
             VALUES
             (
-                :deliveryId,
-                :accId,
-                NOW()
+                :pickUpId,
+                :bottleId
             )
         ";
 
-        $insertPickupStmt = $db->prepare(
-            $insertPickupSql
+        $insertTransactionStmt = $db->prepare(
+            $insertTransactionSql
         );
 
-        $insertPickupStmt->execute([
+        $insertTransactionStmt->execute([
+            ':pickUpId' => $pickUpId,
+            ':bottleId' => $bottleId
+        ]);
+
+        $dptId = (int) $db->lastInsertId();
+
+        /*
+         * -----------------------------------------------------
+         * 10. RECORD PHYSICAL PICKUP SCAN
+         * -----------------------------------------------------
+         *
+         * This is the permanent audit record.
+         *
+         * ScanDateTime comes from MariaDB server time.
+         */
+
+        $scanEventSql = "
+            INSERT INTO bottle_scan_event
+            (
+                BottleID,
+                AccID,
+                EventType,
+                OrderID,
+                DeliveryID,
+                PickUpID,
+                DPTID,
+                ScanDateTime,
+                Latitude,
+                Longitude,
+                LocationAccuracy
+            )
+            VALUES
+            (
+                :bottleId,
+                :accId,
+                'PICKUP_SCAN',
+                :orderId,
+                :deliveryId,
+                :pickUpId,
+                :dptId,
+                CURRENT_TIMESTAMP,
+                :latitude,
+                :longitude,
+                :locationAccuracy
+            )
+        ";
+
+        $scanEventStmt = $db->prepare(
+            $scanEventSql
+        );
+
+        $scanEventStmt->execute([
+            ':bottleId' => $bottleId,
+            ':accId' => $accId,
+            ':orderId' => $orderId,
+            ':deliveryId' => $deliveryId,
+            ':pickUpId' => $pickUpId,
+            ':dptId' => $dptId,
+            ':latitude' => $latitude,
+            ':longitude' => $longitude,
+            ':locationAccuracy' => $locationAccuracy
+        ]);
+
+        $scanEventId = (int) $db->lastInsertId();
+
+        /*
+         * -----------------------------------------------------
+         * 11. UPDATE PICKUP ACTIVITY TIMESTAMP
+         * -----------------------------------------------------
+         *
+         * This is still useful as the overall pickup session
+         * timestamp.
+         *
+         * The exact time of each bottle scan is preserved in
+         * bottle_scan_event.
+         */
+
+        $updatePickupSql = "
+            UPDATE pickup
+
+            SET PickUpDateTime = CURRENT_TIMESTAMP
+
+            WHERE PickUpID = :pickUpId
+              AND DeliveryID = :deliveryId
+              AND AccID = :accId
+        ";
+
+        $updatePickupStmt = $db->prepare(
+            $updatePickupSql
+        );
+
+        $updatePickupStmt->execute([
+            ':pickUpId' => $pickUpId,
             ':deliveryId' => $deliveryId,
             ':accId' => $accId
         ]);
 
-        $pickUpId = (int) $db->lastInsertId();
+        /*
+         * Everything succeeded.
+         */
+
+        $db->commit();
+
+    } catch (PDOException $e) {
+
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+
+        throw $e;
     }
 
     /*
      * ---------------------------------------------------------
-     * 8. Insert pickup transaction
-     * ---------------------------------------------------------
-     */
-
-    $insertTransactionSql = "
-        INSERT INTO delivery_pickup_transaction
-        (
-            PickUpID,
-            BottleID
-        )
-        VALUES
-        (
-            :pickUpId,
-            :bottleId
-        )
-    ";
-
-    $insertTransactionStmt = $db->prepare(
-        $insertTransactionSql
-    );
-
-    $insertTransactionStmt->execute([
-        ':pickUpId' => $pickUpId,
-        ':bottleId' => $bottleId
-    ]);
-
-    /*
-     * ---------------------------------------------------------
-     * 9. Count total picked up bottles AFTER this scan.
+     * 12. COUNT TOTAL PICKED UP BOTTLES
      * ---------------------------------------------------------
      */
 
@@ -482,43 +624,27 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 10. Update pickup timestamp.
-     *
-     *     This records the latest pickup activity.
+     * 13. SUCCESS RESPONSE
      * ---------------------------------------------------------
      */
 
-    $updatePickupSql = "
-        UPDATE pickup
-
-        SET PickUpDateTime = NOW()
-
-        WHERE PickUpID = :pickUpId
-          AND DeliveryID = :deliveryId
-          AND AccID = :accId
-    ";
-
-    $updatePickupStmt = $db->prepare(
-        $updatePickupSql
-    );
-
-    $updatePickupStmt->execute([
-        ':pickUpId' => $pickUpId,
-        ':deliveryId' => $deliveryId,
-        ':accId' => $accId
-    ]);
-
     echo json_encode([
         'success' => true,
+
         'message' =>
             $remainingQuantity > 0
                 ? 'Bottle pickup recorded successfully. Some bottles remain to be picked up.'
                 : 'Bottle pickup recorded successfully. All bottles have now been picked up.',
+
         'data' => [
             'pickUpId' => $pickUpId,
+            'dptId' => $dptId,
+            'scanEventId' => $scanEventId,
+
             'bottleId' => $bottleId,
             'bottleNumber' => $bottle['BottleNumber'],
             'bottleType' => $bottle['BottleType'],
+
             'pickedUpQuantity' => $pickedUpCount,
             'requiredQuantity' => $requiredCount,
             'remainingQuantity' => $remainingQuantity

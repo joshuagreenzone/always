@@ -31,6 +31,7 @@ try {
             b.BottleID,
             b.BottleNumber,
             b.BottleTypeID,
+            b.BottleRegDateTime,
             bt.BottleType,
             bt.Price
         FROM bottles b
@@ -134,7 +135,10 @@ try {
 
         $deliveryStatus = $latestDelivery['DeliveryStatus'];
 
-        // Bottle is currently out with rider.
+        // --------------------------------------------------------
+        // BOTTLE IS CURRENTLY OUT WITH RIDER
+        // --------------------------------------------------------
+
         if (
             $deliveryStatus === 'ASSIGNED' ||
             $deliveryStatus === 'OUT_FOR_DELIVERY'
@@ -167,9 +171,9 @@ try {
             }
         }
 
-        // ========================================================
+        // --------------------------------------------------------
         // BOTTLE WAS DELIVERED BUT NOT PICKED UP
-        // ========================================================
+        // --------------------------------------------------------
 
         if ($deliveryStatus === 'DELIVERED') {
 
@@ -204,7 +208,7 @@ try {
     }
 
     // ============================================================
-    // CHECK LATEST REFILL
+    // FIND LATEST REFILL
     // ============================================================
 
     $refillSql = "
@@ -231,8 +235,7 @@ try {
     $latestRefill = $refillStmt->fetch();
 
     // ============================================================
-    // IF LATEST REFILL IS AFTER LATEST PICKUP,
-    // BOTTLE HAS ALREADY BEEN REFILLED
+    // CHECK IF ALREADY REFILLED AFTER LATEST PICKUP
     // ============================================================
 
     if ($latestRefill && $latestPickup) {
@@ -284,11 +287,12 @@ try {
         "success" => true,
         "message" => "Bottle is eligible for refill.",
         "data" => [
-            "BottleID" => $bottle['BottleID'],
+            "BottleID" => (int) $bottle['BottleID'],
             "BottleNumber" => $bottle['BottleNumber'],
-            "BottleTypeID" => $bottle['BottleTypeID'],
+            "BottleTypeID" => (int) $bottle['BottleTypeID'],
             "BottleType" => $bottle['BottleType'],
-            "Price" => $bottle['Price']
+            "Price" => (float) $bottle['Price'],
+            "BottleRegDateTime" => $bottle['BottleRegDateTime']
         ]
     ]);
 

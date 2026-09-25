@@ -7,6 +7,9 @@ import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_text_styles.dart';
 
+import '../../widgets/common/icon_badge.dart';
+import '../../widgets/common/info_row.dart';
+
 import 'payment_screen.dart';
 
 import '../../services/rider_service.dart';
@@ -52,6 +55,9 @@ class DeliveryConfirmationScreen extends StatelessWidget {
       await showDialog(
         context: context,
         builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppSizes.radiusLg),
+          ),
           title: const Text('Delivery Failed'),
           content: Text(message),
           actions: [
@@ -68,7 +74,7 @@ class DeliveryConfirmationScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Confirm Delivery'), centerTitle: true),
+      appBar: AppBar(title: const Text('Confirm Delivery')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSizes.screenPadding),
@@ -128,11 +134,15 @@ class DeliveryConfirmationScreen extends StatelessWidget {
         padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
         child: Column(
           children: [
-            const Icon(Icons.check_circle, size: 64, color: AppColors.success),
+            IconBadge(
+              icon: Icons.check_circle,
+              color: AppColors.success,
+              size: AppSizes.largeIconSize,
+            ),
 
             const SizedBox(height: AppSpacing.md),
 
-            const Text('Bottles Scanned', style: AppTextStyles.sectionTitle),
+            Text('Bottles Scanned', style: AppTextStyles.title),
 
             const SizedBox(height: AppSpacing.xs),
 
@@ -155,13 +165,17 @@ class DeliveryConfirmationScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Customer', style: AppTextStyles.sectionTitle),
+            Text('Customer', style: AppTextStyles.title),
 
             const SizedBox(height: AppSpacing.md),
 
             Row(
               children: [
-                const Icon(Icons.person_outline, size: 28),
+                const IconBadge(
+                  icon: Icons.person_outline,
+                  color: AppColors.info,
+                  size: 36,
+                ),
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: Text(order.customerName, style: AppTextStyles.body),
@@ -181,23 +195,23 @@ class DeliveryConfirmationScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Order Information', style: AppTextStyles.sectionTitle),
+            Text('Order Information', style: AppTextStyles.title),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.sm),
 
-            _InfoRow(label: 'Order', value: '#${order.orderId}'),
+            InfoRow(label: 'Order', value: '#${order.orderId}'),
 
-            _InfoRow(label: 'Bottle Type', value: order.bottleType),
+            InfoRow(label: 'Bottle Type', value: order.bottleType),
 
-            _InfoRow(label: 'Quantity', value: '${order.quantity}'),
+            InfoRow(label: 'Quantity', value: '${order.quantity}'),
 
-            _InfoRow(
+            InfoRow(
               label: 'Total',
               value: '₱${order.totalAmount.toStringAsFixed(2)}',
               bold: true,
             ),
 
-            _InfoRow(label: 'Payment', value: order.paymentStatus),
+            InfoRow(label: 'Payment', value: order.paymentStatus),
           ],
         ),
       ),
@@ -211,10 +225,7 @@ class DeliveryConfirmationScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Bottles to be Delivered',
-              style: AppTextStyles.sectionTitle,
-            ),
+            Text('Bottles to be Delivered', style: AppTextStyles.title),
 
             const SizedBox(height: AppSpacing.md),
 
@@ -223,7 +234,10 @@ class DeliveryConfirmationScreen extends StatelessWidget {
                 margin: const EdgeInsets.only(bottom: AppSpacing.sm),
                 padding: const EdgeInsets.all(AppSpacing.md),
                 decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.border),
+                  color: AppColors.success.withValues(alpha: 0.06),
+                  border: Border.all(
+                    color: AppColors.success.withValues(alpha: 0.3),
+                  ),
                   borderRadius: BorderRadius.circular(AppSizes.cardRadius),
                 ),
                 child: Row(
@@ -246,37 +260,6 @@ class DeliveryConfirmationScreen extends StatelessWidget {
             }),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final bool bold;
-
-  const _InfoRow({required this.label, required this.value, this.bold = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-      child: Row(
-        children: [
-          Text(label, style: AppTextStyles.bodySecondary),
-
-          const Spacer(),
-
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-              color: AppColors.textPrimary,
-            ),
-          ),
-        ],
       ),
     );
   }

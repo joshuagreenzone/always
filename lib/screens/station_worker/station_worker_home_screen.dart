@@ -55,7 +55,9 @@ class StationWorkerHomeScreen extends StatelessWidget {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const RefillScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => RefillScreen(account: account),
+                  ),
                 );
               },
             ),

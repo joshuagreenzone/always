@@ -3,9 +3,13 @@ import 'package:flutter/material.dart';
 import '../../models/account.dart';
 import '../../models/pickup_order.dart';
 import '../../services/rider_service.dart';
+import '../../theme/app_colors.dart';
 import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_text_styles.dart';
+
+import '../../widgets/common/icon_badge.dart';
+import '../../widgets/common/info_row.dart';
 
 import 'pickup_scan_screen.dart';
 
@@ -80,8 +84,7 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Pickup Bottles'), centerTitle: true),
-
+      appBar: AppBar(title: const Text('Pickup Bottles')),
       body: _buildBody(),
     );
   }
@@ -98,13 +101,18 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 56),
+              IconBadge(
+                icon: Icons.error_outline,
+                color: AppColors.error,
+                size: AppSizes.largeIconSize,
+              ),
 
               const SizedBox(height: AppSpacing.md),
 
               Text(
                 _error!.replaceFirst('Exception: ', ''),
                 textAlign: TextAlign.center,
+                style: AppTextStyles.body,
               ),
 
               const SizedBox(height: AppSpacing.md),
@@ -124,14 +132,25 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
         onRefresh: _loadOrders,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          children: const [
-            SizedBox(height: 180),
+          children: [
+            const SizedBox(height: 160),
 
-            Icon(Icons.local_shipping_outlined, size: 64),
+            Center(
+              child: IconBadge(
+                icon: Icons.local_shipping_outlined,
+                color: AppColors.textSecondary,
+                size: AppSizes.largeIconSize,
+              ),
+            ),
 
-            SizedBox(height: 16),
+            const SizedBox(height: AppSpacing.md),
 
-            Center(child: Text('No bottles are waiting for pickup.')),
+            Center(
+              child: Text(
+                'No bottles are waiting for pickup.',
+                style: AppTextStyles.title,
+              ),
+            ),
           ],
         ),
       );
@@ -139,65 +158,78 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
 
     return RefreshIndicator(
       onRefresh: _loadOrders,
-
-      child: ListView.builder(
+      child: ListView.separated(
         padding: const EdgeInsets.all(AppSizes.screenPadding),
-
         itemCount: _orders.length,
-
+        separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
         itemBuilder: (_, index) {
           final order = _orders[index];
 
           return Card(
-            margin: const EdgeInsets.only(bottom: AppSpacing.md),
-
             child: Padding(
               padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-
                 children: [
-                  Text(
-                    'Order #${order.orderId}',
-                    style: AppTextStyles.dashboardTitle,
-                  ),
+                  Row(
+                    children: [
+                      const IconBadge(
+                        icon: Icons.assignment_return_outlined,
+                        color: AppColors.accent,
+                      ),
 
-                  const SizedBox(height: AppSpacing.xs),
+                      const SizedBox(width: AppSpacing.md),
 
-                  Text(order.customerName, style: AppTextStyles.screenTitle),
-
-                  const SizedBox(height: AppSpacing.sm),
-
-                  Text(
-                    '${order.bottleType} × ${order.quantity}',
-                    style: AppTextStyles.body,
-                  ),
-
-                  const SizedBox(height: AppSpacing.sm),
-
-                  Text(
-                    'Delivered: '
-                    '${order.deliveredBottleCount}',
-                    style: AppTextStyles.bodySecondary,
-                  ),
-
-                  Text(
-                    'Picked up: '
-                    '${order.pickedUpBottleCount}',
-                    style: AppTextStyles.bodySecondary,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Order #${order.orderId}',
+                              style: AppTextStyles.dashboardTitle,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              order.customerName,
+                              style: AppTextStyles.bodySecondary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
 
                   const SizedBox(height: AppSpacing.md),
 
+                  const Divider(),
+
+                  const SizedBox(height: AppSpacing.xs),
+
+                  InfoRow(
+                    icon: Icons.water_drop_outlined,
+                    label: 'Bottle Type',
+                    value: '${order.bottleType} × ${order.quantity}',
+                  ),
+
+                  InfoRow(
+                    icon: Icons.local_shipping_outlined,
+                    label: 'Delivered',
+                    value: '${order.deliveredBottleCount}',
+                  ),
+
+                  InfoRow(
+                    icon: Icons.qr_code_scanner,
+                    label: 'Picked up',
+                    value: '${order.pickedUpBottleCount}',
+                  ),
+
+                  const SizedBox(height: AppSpacing.sm),
+
                   SizedBox(
                     width: double.infinity,
-
                     child: ElevatedButton.icon(
                       onPressed: () => _openPickup(order),
-
                       icon: const Icon(Icons.qr_code_scanner),
-
                       label: const Text('Scan Pickup Bottles'),
                     ),
                   ),

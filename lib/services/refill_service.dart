@@ -41,27 +41,52 @@ class RefillService {
   // CREATE REFILL
   // ------------------------------------------------------------
 
-  Future<void> createRefill({required String bottleNumber}) async {
+  Future<Map<String, dynamic>> createRefill({
+    required int accId,
+    required String bottleNumber,
+    required double latitude,
+    required double longitude,
+    required double accuracy,
+  }) async {
     try {
       final response = await _apiService.dio.post(
         'api/refill/create_refill.php',
-        data: {'bottleNumber': bottleNumber},
+        data: {
+          'accId': accId,
+          'bottleNumber': bottleNumber,
+          'latitude': latitude,
+          'longitude': longitude,
+          'accuracy': accuracy,
+        },
       );
 
       if (response.data['success'] != true) {
-        final message = response.data['message'];
+        final message = response.data['message']?.toString();
 
-        if (message != null &&
-            message.toString().toLowerCase().contains('already')) {
+        if (message != null && message.toLowerCase().contains('already')) {
           throw RefillException('This bottle has already been scanned.');
         }
 
-        throw Exception(message?.toString() ?? 'Unable to record refill.');
+        throw RefillException(message ?? 'Unable to record refill.');
       }
+
+      return Map<String, dynamic>.from(response.data['data'] ?? {});
     } on DioException catch (e) {
-      // HTTP 409 comes here.
+      // HTTP 409 = duplicate/conflicting refill scan.
       if (e.response?.statusCode == 409) {
+        final responseData = e.response?.data;
+
+        if (responseData is Map && responseData['message'] != null) {
+          throw RefillException(responseData['message'].toString());
+        }
+
         throw RefillException('This bottle has already been scanned.');
+      }
+
+      final responseData = e.response?.data;
+
+      if (responseData is Map && responseData['message'] != null) {
+        throw RefillException(responseData['message'].toString());
       }
 
       throw Exception(_getDioMessage(e));
@@ -78,11 +103,12 @@ class RefillService {
 
       if (response.data['success'] != true) {
         throw Exception(
-          response.data['message'] ?? 'Unable to load refilled bottles.',
+          response.data['message']?.toString() ??
+              'Unable to load refilled bottles.',
         );
       }
 
-      final List<dynamic> data = response.data['data'];
+      final List<dynamic> data = response.data['data'] ?? [];
 
       return data
           .map((item) => Refill.fromJson(Map<String, dynamic>.from(item)))
@@ -104,11 +130,12 @@ class RefillService {
 
       if (response.data['success'] != true) {
         throw Exception(
-          response.data['message'] ?? 'Unable to load refill history.',
+          response.data['message']?.toString() ??
+              'Unable to load refill history.',
         );
       }
 
-      final List<dynamic> data = response.data['data'];
+      final List<dynamic> data = response.data['data'] ?? [];
 
       return data
           .map((item) => Refill.fromJson(Map<String, dynamic>.from(item)))
@@ -124,6 +151,16 @@ class RefillService {
 
   String _getDioMessage(DioException e) {
     final statusCode = e.response?.statusCode;
+
+    if (statusCode == 400) {
+      final responseData = e.response?.data;
+
+      if (responseData is Map && responseData['message'] != null) {
+        return responseData['message'].toString();
+      }
+
+      return 'Invalid refill request.';
+    }
 
     if (statusCode == 404) {
       return 'Bottle not found.';

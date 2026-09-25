@@ -1,4 +1,3 @@
-
 <?php
 
 header("Content-Type: application/json");
@@ -9,7 +8,39 @@ try {
 
     $input = json_decode(file_get_contents("php://input"), true);
 
+    $accId = (int) ($input['accId'] ?? 0);
     $bottleNumber = trim($input['bottleNumber'] ?? '');
+
+    $latitude = isset($input['latitude'])
+        ? (float) $input['latitude']
+        : null;
+
+    $longitude = isset($input['longitude'])
+        ? (float) $input['longitude']
+        : null;
+
+    $accuracy = isset($input['accuracy'])
+        ? (float) $input['accuracy']
+        : null;
+
+
+    /*
+     * ---------------------------------------------------------
+     * 1. VALIDATE INPUT
+     * ---------------------------------------------------------
+     */
+
+    if ($accId <= 0) {
+
+        http_response_code(400);
+
+        echo json_encode([
+            "success" => false,
+            "message" => "Account ID is required."
+        ]);
+
+        exit;
+    }
 
     if ($bottleNumber === '') {
 
@@ -23,12 +54,76 @@ try {
         exit;
     }
 
-    $database = new Database();
-    $db = $database->connect();
+    if (
+        $latitude === null ||
+        $longitude === null ||
+        $accuracy === null
+    ) {
+
+        http_response_code(400);
+
+        echo json_encode([
+            "success" => false,
+            "message" =>
+                "Location information is required. Please enable GPS and try again."
+        ]);
+
+        exit;
+    }
+
 
     /*
      * ---------------------------------------------------------
-     * 1. FIND THE BOTTLE
+     * 2. CONNECT TO DATABASE
+     * ---------------------------------------------------------
+     */
+
+    $database = new Database();
+    $db = $database->connect();
+
+
+    /*
+     * ---------------------------------------------------------
+     * 3. VERIFY ACCOUNT
+     * ---------------------------------------------------------
+     */
+
+    $accountSql = "
+        SELECT
+            AccID,
+            AccType
+
+        FROM accounts
+
+        WHERE AccID = :accId
+
+        LIMIT 1
+    ";
+
+    $accountStmt = $db->prepare($accountSql);
+
+    $accountStmt->execute([
+        ':accId' => $accId
+    ]);
+
+    $account = $accountStmt->fetch();
+
+    if (!$account) {
+
+        http_response_code(403);
+
+        echo json_encode([
+            "success" => false,
+            "message" => "Invalid account."
+        ]);
+
+        exit;
+    }
+
+
+    /*
+     * ---------------------------------------------------------
+     * 4. FIND THE BOTTLE
      * ---------------------------------------------------------
      */
 
@@ -75,11 +170,8 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 2. FIND THE MOST RECENT REFILL
+     * 5. FIND THE MOST RECENT REFILL
      * ---------------------------------------------------------
-     *
-     * This is used to determine whether the bottle has already
-     * been refilled after its most recent pickup.
      */
 
     $latestRefillSql = "
@@ -107,11 +199,8 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 3. FIND THE MOST RECENT PICKUP
+     * 6. FIND THE MOST RECENT PICKUP
      * ---------------------------------------------------------
-     *
-     * A bottle must have been physically picked up before
-     * it can be refilled.
      */
 
     $latestPickupSql = "
@@ -143,10 +232,8 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 4. BOTTLE MUST HAVE BEEN PICKED UP
+     * 7. BOTTLE MUST HAVE BEEN PICKED UP
      * ---------------------------------------------------------
-     *
-     * A bottle that has never been picked up cannot be refilled.
      */
 
     if (!$latestPickup) {
@@ -165,17 +252,9 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 5. CHECK WHETHER IT WAS ALREADY REFILLED
-     *    AFTER ITS MOST RECENT PICKUP
+     * 8. CHECK WHETHER ALREADY REFILLED
+     *    AFTER MOST RECENT PICKUP
      * ---------------------------------------------------------
-     *
-     * Valid:
-     *
-     *     PICKUP → REFILL
-     *
-     * Invalid:
-     *
-     *     PICKUP → REFILL → REFILL
      */
 
     if (
@@ -206,13 +285,11 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 6. SAFETY CHECK
+     * 9. SAFETY CHECK
      * ---------------------------------------------------------
      *
-     * Make sure the bottle has not already been scanned into
-     * another delivery after its latest pickup.
-     *
-     * A bottle in this state must not be refilled.
+     * Make sure the bottle has not already been processed
+     * for another delivery after its latest pickup.
      */
 
     $deliverySql = "
@@ -233,7 +310,8 @@ try {
           AND d.DeliveryDateTime >
               :pickupDateTime
 
-        ORDER BY d.DeliveryDateTime DESC, odt.ODTID DESC
+        ORDER BY d.DeliveryDateTime DESC,
+                 odt.ODTID DESC
 
         LIMIT 1
     ";
@@ -270,50 +348,125 @@ try {
 
     /*
      * ---------------------------------------------------------
-     * 7. CREATE NEW REFILL RECORD
+     * 10. CREATE REFILL + SCAN EVENT
      * ---------------------------------------------------------
+     *
+     * Both records are created in one transaction.
+     *
+     * If either insert fails, neither record is saved.
      */
 
-    $insertSql = "
-        INSERT INTO refill
-        (
-            BottleID,
-            RefillDateTime
-        )
-        VALUES
-        (
-            :bottleId,
-            NOW()
-        )
-    ";
+    $db->beginTransaction();
 
-    $insertStmt = $db->prepare($insertSql);
+    try {
 
-    $insertStmt->execute([
-        ':bottleId' => $bottleId
-    ]);
+        /*
+         * Create refill record.
+         */
 
-    $refillId = $db->lastInsertId();
+        $insertSql = "
+            INSERT INTO refill
+            (
+                BottleID,
+                RefillDateTime
+            )
+            VALUES
+            (
+                :bottleId,
+                CURRENT_TIMESTAMP
+            )
+        ";
+
+        $insertStmt = $db->prepare($insertSql);
+
+        $insertStmt->execute([
+            ':bottleId' => $bottleId
+        ]);
+
+        $refillId = (int) $db->lastInsertId();
 
 
-    /*
-     * ---------------------------------------------------------
-     * 8. RETURN SUCCESS
-     * ---------------------------------------------------------
-     */
+        /*
+         * Create immutable bottle scan audit record.
+         */
 
-    echo json_encode([
-        "success" => true,
-        "message" => "Bottle refilled successfully.",
-        "data" => [
-            "RefillID" => $refillId,
-            "BottleID" => $bottleId,
-            "BottleNumber" => $bottle['BottleNumber'],
-            "BottleTypeID" => $bottle['BottleTypeID'],
-            "BottleType" => $bottle['BottleType'],
-            "Price" => $bottle['Price']
-        ]
-    ]);
+        $scanSql = "
+            INSERT INTO bottle_scan_event
+            (
+                BottleID,
+                AccID,
+                EventType,
+                RefillID,
+                ScanDateTime,
+                Latitude,
+                Longitude,
+                LocationAccuracy
+            )
+            VALUES
+            (
+                :bottleId,
+                :accId,
+                'REFILL_SCAN',
+                :refillId,
+                CURRENT_TIMESTAMP,
+                :latitude,
+                :longitude,
+                :accuracy
+            )
+        ";
+
+        $scanStmt = $db->prepare($scanSql);
+
+        $scanStmt->execute([
+            ':bottleId' => $bottleId,
+            ':accId' => $accId,
+            ':refillId' => $refillId,
+            ':latitude' => $latitude,
+            ':longitude' => $longitude,
+            ':accuracy' => $accuracy
+        ]);
+
+        $scanEventId = (int) $db->lastInsertId();
+
+
+        /*
+         * Commit both records.
+         */
+
+        $db->commit();
+
+
+        /*
+         * -----------------------------------------------------
+         * 11. RETURN SUCCESS
+         * -----------------------------------------------------
+         */
+
+        echo json_encode([
+            "success" => true,
+            "message" => "Bottle refilled successfully.",
+            "data" => [
+                "RefillID" => $refillId,
+                "ScanEventID" => $scanEventId,
+                "BottleID" => $bottleId,
+                "BottleNumber" => $bottle['BottleNumber'],
+                "BottleTypeID" => $bottle['BottleTypeID'],
+                "BottleType" => $bottle['BottleType'],
+                "Price" => $bottle['Price'],
+                "Latitude" => $latitude,
+                "Longitude" => $longitude,
+                "LocationAccuracy" => $accuracy
+            ]
+        ]);
+
+    } catch (Throwable $e) {
+
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+
+        throw $e;
+    }
 
 } catch (PDOException $e) {
 
@@ -324,4 +477,3 @@ try {
         "message" => "Database error."
     ]);
 }
-

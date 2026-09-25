@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../models/account.dart';
 import '../../models/pickup_order.dart';
@@ -66,6 +67,40 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     await _processBottle(value.trim());
   }
 
+  //get location
+  Future<Position> _getCurrentLocation() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled) {
+      throw Exception(
+        'Location services are turned off. Please enable GPS and try again.',
+      );
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+
+      if (permission == LocationPermission.denied) {
+        throw Exception('Location permission was denied.');
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      throw Exception(
+        'Location permission is permanently denied. '
+        'Please enable it from the app settings.',
+      );
+    }
+
+    return await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+  }
+
+  //process bottle pick up
+
   Future<void> _processBottle(String bottleNumber) async {
     if (_isProcessing) {
       return;
@@ -90,11 +125,16 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     } catch (_) {}
 
     try {
+      final position = await _getCurrentLocation();
+
       final result = await _riderService.scanPickupBottle(
         accId: widget.account.accId,
         orderId: widget.order.orderId,
         deliveryId: widget.order.deliveryId,
         bottleNumber: bottleNumber,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
       );
 
       if (!mounted) {

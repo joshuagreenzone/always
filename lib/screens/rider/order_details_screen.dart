@@ -9,6 +9,10 @@ import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_text_styles.dart';
 
+import '../../widgets/common/icon_badge.dart';
+import '../../widgets/common/info_row.dart';
+import '../../widgets/common/status_chip.dart';
+
 import 'delivery_scan_screen.dart';
 
 class OrderDetailsScreen extends StatefulWidget {
@@ -69,10 +73,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Order #${widget.order.orderId}'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: Text('Order #${widget.order.orderId}')),
       body: _buildBody(),
     );
   }
@@ -146,7 +147,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
         child: Row(
           children: [
-            const Icon(Icons.receipt_long, size: 44),
+            const IconBadge(
+              icon: Icons.receipt_long,
+              color: AppColors.primary,
+              size: 52,
+            ),
 
             const SizedBox(width: AppSpacing.md),
 
@@ -154,10 +159,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Order #${order.orderId}',
-                    style: AppTextStyles.sectionTitle,
-                  ),
+                  Text('Order #${order.orderId}', style: AppTextStyles.title),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
                     order.deliveryStatus,
@@ -167,7 +169,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               ),
             ),
 
-            _PaymentStatus(status: order.paymentStatus),
+            StatusChip(
+              label: order.paymentStatus,
+              color: paymentStatusColor(order.paymentStatus),
+            ),
           ],
         ),
       ),
@@ -181,13 +186,17 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Customer', style: AppTextStyles.sectionTitle),
+            Text('Customer', style: AppTextStyles.title),
 
             const SizedBox(height: AppSpacing.md),
 
             Row(
               children: [
-                const Icon(Icons.person_outline, size: 28),
+                const IconBadge(
+                  icon: Icons.person_outline,
+                  color: AppColors.info,
+                  size: 36,
+                ),
 
                 const SizedBox(width: AppSpacing.sm),
 
@@ -209,28 +218,28 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Order Information', style: AppTextStyles.sectionTitle),
+            Text('Order Information', style: AppTextStyles.title),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.sm),
 
-            _InfoRow(label: 'Bottle Type', value: order.bottleType),
+            InfoRow(label: 'Bottle Type', value: order.bottleType),
 
-            _InfoRow(label: 'Quantity', value: '${order.quantity}'),
+            InfoRow(label: 'Quantity', value: '${order.quantity}'),
 
-            _InfoRow(
+            InfoRow(
               label: 'Unit Price',
               value: '₱${order.unitPrice.toStringAsFixed(2)}',
             ),
 
-            const Divider(),
+            const Divider(height: AppSpacing.lg),
 
-            _InfoRow(
+            InfoRow(
               label: 'Total Amount',
               value: '₱${order.totalAmount.toStringAsFixed(2)}',
               bold: true,
             ),
 
-            _InfoRow(label: 'Payment', value: order.paymentStatus),
+            InfoRow(label: 'Payment', value: order.paymentStatus),
           ],
         ),
       ),
@@ -244,15 +253,16 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
-                Icon(Icons.water_drop_outlined),
-                SizedBox(width: AppSpacing.sm),
+                const IconBadge(
+                  icon: Icons.water_drop_outlined,
+                  color: AppColors.accent,
+                  size: 36,
+                ),
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(
-                  child: Text(
-                    'Delivery Bottles',
-                    style: AppTextStyles.sectionTitle,
-                  ),
+                  child: Text('Delivery Bottles', style: AppTextStyles.title),
                 ),
               ],
             ),
@@ -265,9 +275,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               style: AppTextStyles.body,
             ),
 
-            const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.xs),
 
-            const Text(
+            Text(
               'Bottle numbers will be recorded when the rider scans the bottles during delivery.',
               style: AppTextStyles.bodySecondary,
             ),
@@ -281,11 +291,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 borderRadius: BorderRadius.circular(AppSizes.cardRadius),
                 border: Border.all(color: AppColors.border),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.qr_code_scanner),
+                  const Icon(
+                    Icons.qr_code_scanner,
+                    color: AppColors.textSecondary,
+                  ),
 
-                  SizedBox(width: AppSpacing.sm),
+                  const SizedBox(width: AppSpacing.sm),
 
                   Expanded(
                     child: Text(
@@ -309,21 +322,20 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSizes.screenPadding),
         children: [
-          const SizedBox(height: 120),
+          const SizedBox(height: 100),
 
-          const Icon(
-            Icons.error_outline,
-            size: AppSizes.largeIconSize,
-            color: AppColors.error,
+          Center(
+            child: IconBadge(
+              icon: Icons.error_outline,
+              color: AppColors.error,
+              size: AppSizes.largeIconSize,
+            ),
           ),
 
           const SizedBox(height: AppSpacing.md),
 
-          const Center(
-            child: Text(
-              'Unable to load order',
-              style: AppTextStyles.sectionTitle,
-            ),
+          Center(
+            child: Text('Unable to load order', style: AppTextStyles.title),
           ),
 
           const SizedBox(height: AppSpacing.sm),
@@ -345,66 +357,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final bool bold;
-
-  const _InfoRow({required this.label, required this.value, this.bold = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-      child: Row(
-        children: [
-          Text(label, style: AppTextStyles.bodySecondary),
-
-          const Spacer(),
-
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-              color: AppColors.textPrimary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PaymentStatus extends StatelessWidget {
-  final String status;
-
-  const _PaymentStatus({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final isPaid = status.toUpperCase() == 'PAID';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: (isPaid ? AppColors.success : AppColors.warning).withOpacity(
-          0.15,
-        ),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        status,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: isPaid ? AppColors.success : AppColors.warning,
-        ),
       ),
     );
   }

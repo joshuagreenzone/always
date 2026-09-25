@@ -39,6 +39,8 @@ dependencies:
   mobile_scanner: ^7.4.2
   image_picker: ^1.1.2
   intl: ^0.20.3
+  geolocator: ^14.0.3
+  google_fonts: ^8.2.1
 
 dev_dependencies:
   flutter_test:
@@ -56,6 +58,8 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  assets:
+    - assets/images/logo.png
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
