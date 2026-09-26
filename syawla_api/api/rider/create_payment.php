@@ -34,7 +34,11 @@ try {
         ? trim($_POST['notes'])
         : '';
 
+    /*
+     * Basic validation
+     */
     if ($accId <= 0 || $orderId <= 0) {
+
         http_response_code(400);
 
         echo json_encode([
@@ -46,6 +50,7 @@ try {
     }
 
     if ($paymentAmount <= 0) {
+
         http_response_code(400);
 
         echo json_encode([
@@ -56,17 +61,20 @@ try {
         exit;
     }
 
+    /*
+     * Round to 2 decimal places because payment values
+     * are monetary amounts.
+     */
+    $paymentAmount = round($paymentAmount, 2);
+
     $allowedPaymentTypes = [
         'CASH',
         'GCASH',
         'BANK_TRANSFER'
     ];
 
-    if (!in_array(
-        $paymentType,
-        $allowedPaymentTypes,
-        true
-    )) {
+    if (!in_array($paymentType, $allowedPaymentTypes, true)) {
+
         http_response_code(400);
 
         echo json_encode([
@@ -96,9 +104,10 @@ try {
         ':accId' => $accId
     ]);
 
-    $account = $accountStmt->fetch();
+    $account = $accountStmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$account) {
+
         http_response_code(403);
 
         echo json_encode([
@@ -109,10 +118,14 @@ try {
         exit;
     }
 
+    /*
+     * Only ADMIN and RIDER accounts may receive payments.
+     */
     if (
         $account['AccType'] !== 'ADMIN' &&
         $account['AccType'] !== 'RIDER'
     ) {
+
         http_response_code(403);
 
         echo json_encode([
@@ -125,116 +138,13 @@ try {
     }
 
     /*
-     * Verify order.
-     */
-    $orderSql = "
-        SELECT
-            o.OrderID,
-            o.CustomerID,
-            o.Quantity,
-            o.UnitPrice,
-            (o.Quantity * o.UnitPrice) AS TotalAmount
-        FROM orders o
-        WHERE o.OrderID = :orderId
-        LIMIT 1
-    ";
-
-    $orderStmt = $db->prepare($orderSql);
-
-    $orderStmt->execute([
-        ':orderId' => $orderId
-    ]);
-
-    $order = $orderStmt->fetch();
-
-    if (!$order) {
-        http_response_code(404);
-
-        echo json_encode([
-            'success' => false,
-            'message' => 'Order not found.'
-        ]);
-
-        exit;
-    }
-
-    /*
-     * Rider can only receive payment for their own delivery.
-     */
-    if ($account['AccType'] === 'RIDER') {
-
-        $deliverySql = "
-            SELECT DeliveryID
-            FROM delivery
-            WHERE OrderID = :orderId
-              AND AccID = :accId
-            LIMIT 1
-        ";
-
-        $deliveryStmt = $db->prepare($deliverySql);
-
-        $deliveryStmt->execute([
-            ':orderId' => $orderId,
-            ':accId' => $accId
-        ]);
-
-        $delivery = $deliveryStmt->fetch();
-
-        if (!$delivery) {
-            http_response_code(403);
-
-            echo json_encode([
-                'success' => false,
-                'message' =>
-                    'This order is not assigned to this rider.'
-            ]);
-
-            exit;
-        }
-    }
-
-    /*
-     * Calculate current payment total.
-     */
-    $paidSql = "
-        SELECT
-            COALESCE(SUM(opt.Amount), 0) AS PaidAmount
-        FROM order_payment_transaction opt
-        INNER JOIN payments p
-            ON opt.PaymentID = p.PaymentID
-        WHERE opt.OrderID = :orderId
-    ";
-
-    $paidStmt = $db->prepare($paidSql);
-
-    $paidStmt->execute([
-        ':orderId' => $orderId
-    ]);
-
-    $paid = $paidStmt->fetch();
-
-    $totalAmount = (float) $order['TotalAmount'];
-    $alreadyPaid = (float) $paid['PaidAmount'];
-
-    $outstanding = $totalAmount - $alreadyPaid;
-
-    if ($paymentAmount > $outstanding + 0.00001) {
-        http_response_code(400);
-
-        echo json_encode([
-            'success' => false,
-            'message' =>
-                'Payment exceeds the outstanding balance.'
-        ]);
-
-        exit;
-    }
-
-    /*
      * Receipt image.
      *
-     * Cash does NOT require an image.
-     * GCash and Bank Transfer DO require an image.
+     * CASH:
+     *     receipt image is optional.
+     *
+     * GCASH / BANK_TRANSFER:
+     *     receipt image is required.
      */
     $receiptImage = null;
 
@@ -242,9 +152,9 @@ try {
 
         if (
             !isset($_FILES['receiptImage']) ||
-            $_FILES['receiptImage']['error'] !==
-                UPLOAD_ERR_OK
+            $_FILES['receiptImage']['error'] !== UPLOAD_ERR_OK
         ) {
+
             http_response_code(400);
 
             echo json_encode([
@@ -256,7 +166,11 @@ try {
             exit;
         }
 
-        if ($_FILES['receiptImage']['size'] > 5 * 1024 * 1024) {
+        if (
+            $_FILES['receiptImage']['size'] >
+            5 * 1024 * 1024
+        ) {
+
             http_response_code(400);
 
             echo json_encode([
@@ -283,6 +197,7 @@ try {
             $allowedMimeTypes,
             true
         )) {
+
             http_response_code(400);
 
             echo json_encode([
@@ -298,6 +213,7 @@ try {
         );
 
         if ($receiptImage === false) {
+
             http_response_code(500);
 
             echo json_encode([
@@ -310,7 +226,184 @@ try {
         }
     }
 
+    /*
+     * Begin transaction BEFORE checking the outstanding
+     * balance.
+     *
+     * The order row will be locked with FOR UPDATE so
+     * simultaneous payment requests cannot both spend
+     * the same outstanding balance.
+     */
     $db->beginTransaction();
+
+    /*
+     * Lock and retrieve the order.
+     */
+    $orderSql = "
+        SELECT
+            o.OrderID,
+            o.CustomerID,
+            o.Quantity,
+            o.UnitPrice,
+            o.PaymentStatus,
+            (o.Quantity * o.UnitPrice) AS TotalAmount
+        FROM orders o
+        WHERE o.OrderID = :orderId
+        LIMIT 1
+        FOR UPDATE
+    ";
+
+    $orderStmt = $db->prepare($orderSql);
+
+    $orderStmt->execute([
+        ':orderId' => $orderId
+    ]);
+
+    $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$order) {
+
+        $db->rollBack();
+
+        http_response_code(404);
+
+        echo json_encode([
+            'success' => false,
+            'message' => 'Order not found.'
+        ]);
+
+        exit;
+    }
+
+    /*
+     * Rider authorization.
+     *
+     * A rider must have a delivery assignment for this order.
+     */
+    if ($account['AccType'] === 'RIDER') {
+
+        $deliverySql = "
+            SELECT
+                DeliveryID,
+                DeliveryStatus
+            FROM delivery
+            WHERE OrderID = :orderId
+              AND AccID = :accId
+            LIMIT 1
+        ";
+
+        $deliveryStmt = $db->prepare($deliverySql);
+
+        $deliveryStmt->execute([
+            ':orderId' => $orderId,
+            ':accId' => $accId
+        ]);
+
+        $delivery = $deliveryStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$delivery) {
+
+            $db->rollBack();
+
+            http_response_code(403);
+
+            echo json_encode([
+                'success' => false,
+                'message' =>
+                    'This order is not assigned to this rider.'
+            ]);
+
+            exit;
+        }
+    }
+
+    /*
+     * Calculate all previous payments while the order
+     * remains locked.
+     */
+    $paidSql = "
+        SELECT
+            COALESCE(SUM(opt.Amount), 0) AS PaidAmount
+        FROM order_payment_transaction opt
+        INNER JOIN payments p
+            ON opt.PaymentID = p.PaymentID
+        WHERE opt.OrderID = :orderId
+    ";
+
+    $paidStmt = $db->prepare($paidSql);
+
+    $paidStmt->execute([
+        ':orderId' => $orderId
+    ]);
+
+    $paid = $paidStmt->fetch(PDO::FETCH_ASSOC);
+
+    $totalAmount = round(
+        (float) $order['TotalAmount'],
+        2
+    );
+
+    $alreadyPaid = round(
+        (float) $paid['PaidAmount'],
+        2
+    );
+
+    $outstanding = round(
+        $totalAmount - $alreadyPaid,
+        2
+    );
+
+    /*
+     * Prevent payments on an already fully paid order.
+     */
+    if ($outstanding <= 0) {
+
+        $db->rollBack();
+
+        http_response_code(400);
+
+        echo json_encode([
+            'success' => false,
+            'message' => 'This order is already fully paid.',
+            'data' => [
+                'totalAmount' => $totalAmount,
+                'paidAmount' => $alreadyPaid,
+                'outstandingAmount' => 0,
+                'paymentStatus' => 'PAID'
+            ]
+        ]);
+
+        exit;
+    }
+
+    /*
+     * IMPORTANT:
+     * Never allow payment to exceed the actual
+     * outstanding balance.
+     */
+    if ($paymentAmount > $outstanding) {
+
+        $db->rollBack();
+
+        http_response_code(400);
+
+        echo json_encode([
+            'success' => false,
+            'message' =>
+                'Payment exceeds the outstanding balance.',
+            'data' => [
+                'totalAmount' => $totalAmount,
+                'paidAmount' => $alreadyPaid,
+                'outstandingAmount' => $outstanding,
+                'paymentStatus' =>
+                    $alreadyPaid > 0
+                        ? 'PARTIALLY_PAID'
+                        : 'UNPAID'
+            ]
+        ]);
+
+        exit;
+    }
 
     /*
      * Create payment.
@@ -363,12 +456,15 @@ try {
     );
 
     if ($receiptImage === null) {
+
         $paymentStmt->bindValue(
             ':receiptImage',
             null,
             PDO::PARAM_NULL
         );
+
     } else {
+
         $paymentStmt->bindValue(
             ':receiptImage',
             $receiptImage,
@@ -377,12 +473,15 @@ try {
     }
 
     if ($notes === '') {
+
         $paymentStmt->bindValue(
             ':notes',
             null,
             PDO::PARAM_NULL
         );
+
     } else {
+
         $paymentStmt->bindValue(
             ':notes',
             $notes
@@ -420,21 +519,29 @@ try {
     ]);
 
     /*
-     * Calculate new payment status.
+     * Calculate new totals.
      */
-    $newPaidAmount =
-        $alreadyPaid + $paymentAmount;
+    $newPaidAmount = round(
+        $alreadyPaid + $paymentAmount,
+        2
+    );
 
-    $newOutstanding =
-        $totalAmount - $newPaidAmount;
+    $newOutstanding = round(
+        $totalAmount - $newPaidAmount,
+        2
+    );
 
-    if ($newOutstanding <= 0.00001) {
-        $paymentStatus = 'PAID';
+    /*
+     * Avoid tiny decimal precision issues.
+     */
+    if ($newOutstanding <= 0.01) {
+
         $newOutstanding = 0;
-    } elseif ($newPaidAmount > 0) {
-        $paymentStatus = 'PARTIAL';
+        $paymentStatus = 'PAID';
+
     } else {
-        $paymentStatus = 'UNPAID';
+
+        $paymentStatus = 'PARTIALLY_PAID';
     }
 
     /*
@@ -455,6 +562,9 @@ try {
         ':orderId' => $orderId
     ]);
 
+    /*
+     * Commit everything.
+     */
     $db->commit();
 
     echo json_encode([
@@ -462,6 +572,7 @@ try {
         'message' => 'Payment recorded successfully.',
         'data' => [
             'paymentId' => $paymentId,
+            'orderId' => $orderId,
             'totalAmount' => $totalAmount,
             'paidAmount' => $newPaidAmount,
             'outstandingAmount' => $newOutstanding,
@@ -473,7 +584,10 @@ try {
 
 } catch (PDOException $e) {
 
-    if ($db !== null && $db->inTransaction()) {
+    if (
+        $db !== null &&
+        $db->inTransaction()
+    ) {
         $db->rollBack();
     }
 
@@ -483,4 +597,21 @@ try {
         'success' => false,
         'message' => 'Database error.'
     ]);
+
+} catch (Throwable $e) {
+
+    if (
+        $db !== null &&
+        $db->inTransaction()
+    ) {
+        $db->rollBack();
+    }
+
+    http_response_code(500);
+
+    echo json_encode([
+        'success' => false,
+        'message' => 'Unable to process payment.'
+    ]);
 }
+?>

@@ -3,7 +3,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../models/account.dart';
-
 import '../../models/bottle.dart';
 import '../../services/refill_service.dart';
 import '../../theme/app_colors.dart';
@@ -117,10 +116,6 @@ class _RefillScreenState extends State<RefillScreen> {
     });
 
     try {
-      /*
-       * Get the physical location at the moment the
-       * refill is confirmed.
-       */
       final position = await _getCurrentLocation();
 
       await _refillService.createRefill(
@@ -139,8 +134,7 @@ class _RefillScreenState extends State<RefillScreen> {
       });
 
       await _showSuccessDialog(
-        '${bottle.bottleNumber} has been successfully '
-        'recorded as refilled.',
+        '${bottle.bottleNumber} has been successfully recorded as refilled.',
       );
     } on RefillException catch (e) {
       if (!mounted) return;
@@ -166,20 +160,45 @@ class _RefillScreenState extends State<RefillScreen> {
       barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppSizes.radiusLg),
+          ),
           title: const Row(
             children: [
-              Icon(Icons.check_circle, color: AppColors.success),
+              Icon(
+                Icons.check_circle_rounded,
+                color: Color(0xFF10B981),
+                size: 28,
+              ),
               SizedBox(width: AppSpacing.sm),
-              Expanded(child: Text('Refill Successful')),
+              Expanded(
+                child: Text(
+                  'Refill Successful',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+              ),
             ],
           ),
-          content: Text(message),
+          content: Text(
+            message,
+            style: const TextStyle(fontSize: 14, color: Color(0xFF475569)),
+          ),
           actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('OK'),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0284C7),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text(
+                'OK',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         );
@@ -196,23 +215,32 @@ class _RefillScreenState extends State<RefillScreen> {
       barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppSizes.radiusLg),
+          ),
           title: const Row(
             children: [
-              Icon(Icons.cancel, color: AppColors.error),
+              Icon(Icons.cancel_rounded, color: AppColors.error, size: 28),
               SizedBox(width: AppSpacing.sm),
-              Expanded(child: Text('Invalid Bottle')),
+              Expanded(
+                child: Text(
+                  'Invalid Bottle',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+              ),
             ],
           ),
           content: Text(
-            '$message\n\n'
-            'Bottle: $bottleNumber',
+            '$message\n\nBottle: $bottleNumber',
+            style: const TextStyle(fontSize: 14, color: Color(0xFF475569)),
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('OK'),
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text(
+                'OK',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         );
@@ -236,7 +264,16 @@ class _RefillScreenState extends State<RefillScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Refill')),
+      backgroundColor: const Color(0xFFF4F6F9),
+      appBar: AppBar(
+        title: const Text(
+          'Refill Bottle',
+          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.3),
+        ),
+        elevation: 0,
+        scrolledUnderElevation: 2,
+        centerTitle: true,
+      ),
       body: _buildBody(),
     );
   }
@@ -247,7 +284,9 @@ class _RefillScreenState extends State<RefillScreen> {
     }
 
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF0284C7)),
+      );
     }
 
     if (_errorMessage != null) {
@@ -268,27 +307,66 @@ class _RefillScreenState extends State<RefillScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.water_drop, size: 80, color: AppColors.primary),
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0284C7).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.water_drop_rounded,
+                size: 72,
+                color: Color(0xFF0284C7),
+              ),
+            ),
             const SizedBox(height: AppSpacing.lg),
             const Text(
-              'Bottle Refill',
-              style: AppTextStyles.screenTitle,
+              'Register Bottle Refill',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1E293B),
+              ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: AppSpacing.sm),
-            const Text(
-              'Scan the QR code attached to the gallon '
-              'to identify the bottle before refilling.',
-              style: AppTextStyles.bodySecondary,
-              textAlign: TextAlign.center,
+            const SizedBox(height: AppSpacing.xs),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: Text(
+                'Scan the QR code on the water gallon to verify its identity before processing.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF64748B),
+                  height: 1.4,
+                ),
+                textAlign: TextAlign.center,
+              ),
             ),
-            const SizedBox(height: AppSpacing.xl),
+            const SizedBox(height: AppSpacing.xl * 1.5),
             SizedBox(
               width: double.infinity,
+              height: 52,
               child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 2,
+                ),
                 onPressed: _scanBottle,
-                icon: const Icon(Icons.qr_code_scanner),
-                label: const Text('SCAN QR CODE'),
+                icon: const Icon(
+                  Icons.qr_code_scanner_rounded,
+                  color: Colors.white,
+                ),
+                label: const Text(
+                  'SCAN QR CODE',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
               ),
             ),
           ],
@@ -303,16 +381,12 @@ class _RefillScreenState extends State<RefillScreen> {
       children: [
         MobileScanner(
           onDetect: (capture) {
-            if (capture.barcodes.isEmpty) {
-              return;
-            }
+            if (capture.barcodes.isEmpty) return;
 
             final barcode = capture.barcodes.first;
             final value = barcode.rawValue;
 
-            if (value == null || value.trim().isEmpty) {
-              return;
-            }
+            if (value == null || value.trim().isEmpty) return;
 
             _handleQrCode(value.trim());
           },
@@ -322,26 +396,36 @@ class _RefillScreenState extends State<RefillScreen> {
           left: AppSpacing.lg,
           right: AppSpacing.lg,
           child: Container(
-            padding: const EdgeInsets.all(AppSpacing.md),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.65),
-              borderRadius: BorderRadius.circular(AppSizes.cardRadius),
+              color: Colors.black.withOpacity(0.75),
+              borderRadius: BorderRadius.circular(14),
             ),
             child: const Text(
-              'Point the camera at the QR code '
-              'on the gallon.',
-              style: TextStyle(color: Colors.white, fontSize: 16),
+              'Point your camera at the QR code on the bottle',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
               textAlign: TextAlign.center,
             ),
           ),
         ),
         Center(
           child: Container(
-            width: 250,
-            height: 250,
+            width: 240,
+            height: 240,
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.white, width: 3),
-              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFF0284C7), width: 3),
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF0284C7).withOpacity(0.3),
+                  blurRadius: 20,
+                  spreadRadius: 2,
+                ),
+              ],
             ),
           ),
         ),
@@ -350,10 +434,23 @@ class _RefillScreenState extends State<RefillScreen> {
           left: AppSpacing.lg,
           right: AppSpacing.lg,
           child: SizedBox(
-            height: AppSizes.buttonHeight,
+            height: 50,
             child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF1E293B),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
               onPressed: _resetScan,
-              child: const Text('CANCEL'),
+              child: const Text(
+                'CANCEL',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
             ),
           ),
         ),
@@ -370,18 +467,50 @@ class _RefillScreenState extends State<RefillScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: AppSpacing.sm),
-            const Icon(Icons.check_circle, size: 70, color: AppColors.success),
+            const SizedBox(height: AppSpacing.md),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.check_circle_rounded,
+                  size: 56,
+                  color: Color(0xFF10B981),
+                ),
+              ),
+            ),
             const SizedBox(height: AppSpacing.md),
             const Text(
               'Bottle Verified',
-              style: AppTextStyles.screenTitle,
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1E293B),
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.lg),
-            Card(
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: const Color(0xFF0284C7).withOpacity(0.2),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF0284C7).withOpacity(0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
               child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
+                padding: const EdgeInsets.all(20.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -391,38 +520,78 @@ class _RefillScreenState extends State<RefillScreen> {
                       valueStyle: const TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.lg),
-                    _InfoItem(label: 'Bottle Type', value: bottle.bottleType),
-                    const SizedBox(height: AppSpacing.lg),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Divider(height: 1, color: Color(0xFFE2E8F0)),
+                    ),
+                    _InfoItem(
+                      label: 'Bottle Type',
+                      value: bottle.bottleType,
+                      valueStyle: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF0284C7),
+                      ),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Divider(height: 1, color: Color(0xFFE2E8F0)),
+                    ),
                     _InfoItem(
                       label: 'Refill Price',
                       value: '₱${bottle.price.toStringAsFixed(2)}',
                       valueStyle: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
+                        color: Color(0xFF10B981),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: AppSpacing.xl),
+            const SizedBox(height: AppSpacing.xl * 1.5),
             SizedBox(
-              height: AppSizes.buttonHeight,
+              height: 52,
               child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 2,
+                ),
                 onPressed: _confirmRefill,
-                icon: const Icon(Icons.water_drop),
-                label: const Text('CONFIRM REFILL'),
+                icon: const Icon(Icons.water_drop_rounded, color: Colors.white),
+                label: const Text(
+                  'CONFIRM REFILL',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
             SizedBox(
-              height: AppSizes.buttonHeight,
+              height: 50,
               child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF64748B),
+                  side: const BorderSide(color: Color(0xFFCBD5E1)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
                 onPressed: _resetScan,
-                child: const Text('SCAN DIFFERENT BOTTLE'),
+                child: const Text(
+                  'SCAN DIFFERENT BOTTLE',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
             ),
           ],
@@ -438,29 +607,53 @@ class _RefillScreenState extends State<RefillScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.error_outline,
-              size: AppSizes.largeIconSize,
-              color: AppColors.error,
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.error.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                size: 48,
+                color: AppColors.error,
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             const Text(
               'Unable to Verify Bottle',
-              style: AppTextStyles.sectionTitle,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1E293B),
+              ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.xs),
             Text(
               _errorMessage!,
-              style: AppTextStyles.bodySecondary,
+              style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.lg),
             SizedBox(
-              width: double.infinity,
+              width: 180,
+              height: 44,
               child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
                 onPressed: _resetScan,
-                child: const Text('TRY AGAIN'),
+                child: const Text(
+                  'TRY AGAIN',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ),
           ],
@@ -482,9 +675,21 @@ class _InfoItem extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: AppTextStyles.bodySecondary),
-        const SizedBox(height: AppSpacing.xs),
-        Text(value, style: valueStyle ?? AppTextStyles.body),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: Color(0xFF94A3B8),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style:
+              valueStyle ??
+              const TextStyle(fontSize: 15, color: Color(0xFF1E293B)),
+        ),
       ],
     );
   }

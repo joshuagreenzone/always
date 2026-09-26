@@ -17,7 +17,20 @@ import '../../services/rider_service.dart';
 class DeliveryConfirmationScreen extends StatelessWidget {
   final Account account;
   final OrderDetails order;
-  final List<String> scannedBottles;
+
+  /*
+   * Temporary bottles scanned by the rider.
+   *
+   * Each item contains:
+   *
+   * bottleNumber
+   * latitude
+   * longitude
+   * accuracy
+   *
+   * These bottles have NOT been saved to the database yet.
+   */
+  final List<Map<String, dynamic>> scannedBottles;
 
   const DeliveryConfirmationScreen({
     super.key,
@@ -26,7 +39,32 @@ class DeliveryConfirmationScreen extends StatelessWidget {
     required this.scannedBottles,
   });
 
+  // ============================================================
+  // COMPLETE DELIVERY
+  // ============================================================
+  //
+  // This function sends ALL temporarily scanned bottles to the
+  // server only after the rider confirms the delivery.
+  //
+  // The server will validate all bottles and save them inside
+  // one database transaction.
+  //
+  // If one bottle fails validation, the server rolls everything
+  // back, so no partial delivery is saved.
+  //
+
   Future<void> _completeDelivery(BuildContext context) async {
+    /*
+     * IMPORTANT:
+     *
+     * Do not call completeDelivery() while scanning.
+     *
+     * The DeliveryScanScreen only keeps scanned bottles in
+     * temporary memory.
+     *
+     * This is the point where the temporary bottle list is
+     * finally sent to the server.
+     */
     try {
       final riderService = RiderService();
 
@@ -34,12 +72,19 @@ class DeliveryConfirmationScreen extends StatelessWidget {
         accId: account.accId,
         orderId: order.orderId,
         deliveryId: order.deliveryId,
+        bottles: scannedBottles,
       );
 
       if (!context.mounted) {
         return;
       }
 
+      /*
+       * Delivery was successfully completed.
+       *
+       * Return to the first screen so the completed order is no
+       * longer left in the rider's delivery flow.
+       */
       Navigator.popUntil(context, (route) => route.isFirst);
     } catch (e) {
       if (!context.mounted) {
@@ -71,8 +116,88 @@ class DeliveryConfirmationScreen extends StatelessWidget {
     }
   }
 
+  // ============================================================
+  // CONFIRM DELIVERY
+  // ============================================================
+  //
+  // This is the single entry point when the rider presses
+  // "Confirm Delivery".
+  //
+  // Before proceeding, make sure the rider scanned exactly the
+  // number of bottles required by the order.
+  //
+  // This prevents the rider from reaching the payment screen or
+  // completing a delivery with an incomplete bottle list.
+  // ============================================================
+
+  Future<void> _handleConfirmDelivery(BuildContext context) async {
+    if (scannedBottles.length != order.quantity) {
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppSizes.radiusLg),
+          ),
+          title: const Text('Incomplete Bottle Scan'),
+          content: Text(
+            'This order requires ${order.quantity} bottle'
+            '${order.quantity == 1 ? '' : 's'}, '
+            'but only ${scannedBottles.length} '
+            'bottle${scannedBottles.length == 1 ? '' : 's'} '
+            'ha${scannedBottles.length == 1 ? 's' : 've'} been scanned.\n\n'
+            'Please scan all required bottles before confirming '
+            'the delivery.',
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+
+      return;
+    }
+
+    /*
+     * The order is already fully paid.
+     *
+     * We can complete the delivery immediately.
+     *
+     * The temporary bottles are sent to completeDelivery(),
+     * which performs the final database transaction.
+     */
+    if (order.paymentStatus == 'PAID') {
+      await _completeDelivery(context);
+      return;
+    }
+
+    /*
+     * UNPAID or PARTIALLY_PAID
+     *
+     * Open the payment screen.
+     *
+     * The temporary bottle list is passed to PaymentScreen so
+     * the scan information is preserved while payment is being
+     * recorded.
+     */
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PaymentScreen(
+          account: account,
+          order: order,
+          scannedBottles: scannedBottles,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final bool allBottlesScanned = scannedBottles.length == order.quantity;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Confirm Delivery')),
       body: SafeArea(
@@ -100,33 +225,40 @@ class DeliveryConfirmationScreen extends StatelessWidget {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: () async {
-                    if (order.paymentStatus == 'PAID') {
-                      // Already fully paid.
-                      // Do not open the payment screen.
-                      await _completeDelivery(context);
-                      return;
-                    }
-
-                    // UNPAID or PARTIALLY_PAID
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            PaymentScreen(account: account, order: order),
-                      ),
-                    );
-                  },
+                  /*
+                   * The button is only enabled when all required
+                   * bottles have been scanned.
+                   */
+                  onPressed: allBottlesScanned
+                      ? () => _handleConfirmDelivery(context)
+                      : null,
                   icon: const Icon(Icons.check_circle),
                   label: const Text('Confirm Delivery'),
                 ),
               ),
+
+              if (!allBottlesScanned) ...[
+                const SizedBox(height: AppSpacing.sm),
+
+                Center(
+                  child: Text(
+                    'Scan all ${order.quantity} required bottles '
+                    'before confirming the delivery.',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.bodySecondary,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
       ),
     );
   }
+
+  // ============================================================
+  // SUCCESS HEADER
+  // ============================================================
 
   Widget _buildSuccessHeader() {
     return Card(
@@ -158,6 +290,10 @@ class DeliveryConfirmationScreen extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  // CUSTOMER CARD
+  // ============================================================
+
   Widget _buildCustomerCard() {
     return Card(
       child: Padding(
@@ -187,6 +323,10 @@ class DeliveryConfirmationScreen extends StatelessWidget {
       ),
     );
   }
+
+  // ============================================================
+  // ORDER CARD
+  // ============================================================
 
   Widget _buildOrderCard() {
     return Card(
@@ -218,6 +358,16 @@ class DeliveryConfirmationScreen extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  // BOTTLES CARD
+  // ============================================================
+  //
+  // Displays the temporary bottles that will be submitted when
+  // the delivery is finally confirmed.
+  //
+  // The bottles are still NOT saved to the database here.
+  // ============================================================
+
   Widget _buildBottlesCard() {
     return Card(
       child: Padding(
@@ -229,7 +379,9 @@ class DeliveryConfirmationScreen extends StatelessWidget {
 
             const SizedBox(height: AppSpacing.md),
 
-            ...scannedBottles.map((bottleNumber) {
+            ...scannedBottles.map((bottle) {
+              final bottleNumber = bottle['bottleNumber']?.toString() ?? '';
+
               return Container(
                 margin: const EdgeInsets.only(bottom: AppSpacing.sm),
                 padding: const EdgeInsets.all(AppSpacing.md),

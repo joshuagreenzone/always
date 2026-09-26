@@ -53,33 +53,58 @@ class _RefilledBottlesScreenState extends State<RefilledBottlesScreen> {
     }
   }
 
+  // Formats date into words (e.g., "Sep 26, 2026 at 8:51 AM")
   String _formatDate(DateTime dateTime) {
     final date = dateTime.toLocal();
 
-    final month = date.month.toString().padLeft(2, '0');
-    final day = date.day.toString().padLeft(2, '0');
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    final month = months[date.month - 1];
+    final day = date.day;
     final year = date.year;
 
     final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
-
     final minute = date.minute.toString().padLeft(2, '0');
-
     final period = date.hour >= 12 ? 'PM' : 'AM';
 
-    return '$month/$day/$year $hour:$minute $period';
+    return '$month $day, $year at $hour:$minute $period';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Refilled Bottles')),
+      backgroundColor: const Color(0xFFF4F6F9),
+      appBar: AppBar(
+        title: const Text(
+          'Refilled Bottles',
+          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.3),
+        ),
+        elevation: 0,
+        scrolledUnderElevation: 2,
+        centerTitle: true,
+      ),
       body: _buildBody(),
     );
   }
 
   Widget _buildBody() {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF0284C7)),
+      );
     }
 
     if (_errorMessage != null) {
@@ -91,11 +116,14 @@ class _RefilledBottlesScreenState extends State<RefilledBottlesScreen> {
     }
 
     return RefreshIndicator(
+      color: const Color(0xFF0284C7),
       onRefresh: _loadRefills,
-      child: ListView.builder(
+      child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSizes.screenPadding),
         itemCount: _refills.length,
+        separatorBuilder: (context, index) =>
+            const SizedBox(height: AppSpacing.sm),
         itemBuilder: (context, index) {
           final refill = _refills[index];
 
@@ -115,35 +143,65 @@ class _RefilledBottlesScreenState extends State<RefilledBottlesScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.error_outline,
-              size: AppSizes.largeIconSize,
-              color: AppColors.error,
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.error.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                size: 48,
+                color: AppColors.error,
+              ),
             ),
 
             const SizedBox(height: AppSpacing.md),
 
             const Text(
               'Unable to Load Refills',
-              style: AppTextStyles.sectionTitle,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1E293B),
+              ),
               textAlign: TextAlign.center,
             ),
 
-            const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.xs),
 
             Text(
               _errorMessage!,
-              style: AppTextStyles.bodySecondary,
+              style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
               textAlign: TextAlign.center,
             ),
 
             const SizedBox(height: AppSpacing.lg),
 
             SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
+              width: 180,
+              height: 44,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
                 onPressed: _loadRefills,
-                child: const Text('RETRY'),
+                icon: const Icon(
+                  Icons.refresh_rounded,
+                  size: 18,
+                  color: Colors.white,
+                ),
+                label: const Text(
+                  'RETRY',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                    color: Colors.white,
+                  ),
+                ),
               ),
             ),
           ],
@@ -154,25 +212,47 @@ class _RefilledBottlesScreenState extends State<RefilledBottlesScreen> {
 
   Widget _buildEmpty() {
     return RefreshIndicator(
+      color: const Color(0xFF0284C7),
       onRefresh: _loadRefills,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          SizedBox(height: 160),
+          const SizedBox(height: 120),
 
-          const Icon(
-            Icons.water_drop_outlined,
-            size: AppSizes.largeIconSize,
-            color: AppColors.textSecondary,
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0284C7).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.water_drop_outlined,
+                size: 56,
+                color: Color(0xFF0284C7),
+              ),
+            ),
           ),
 
           const SizedBox(height: AppSpacing.md),
 
+          const Text(
+            'No Refilled Bottles Ready',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E293B),
+            ),
+          ),
+
+          const SizedBox(height: 6),
+
           const Padding(
-            padding: EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            padding: EdgeInsets.symmetric(horizontal: AppSpacing.xl),
             child: Text(
-              'No bottles have been refilled yet.',
-              style: AppTextStyles.body,
+              'Bottles ready for delivery will appear here after being refilled.',
+              style: TextStyle(fontSize: 14, color: Color(0xFF64748B)),
               textAlign: TextAlign.center,
             ),
           ),
@@ -188,56 +268,231 @@ class _RefillCard extends StatelessWidget {
 
   const _RefillCard({required this.refill, required this.formattedDate});
 
+  // Maps specific bottle types (Square, Round, Wilkins) to unique water styles
+  _BottleStyle _getBottleStyle(String type) {
+    final lower = type.toLowerCase();
+
+    if (lower.contains('square')) {
+      return const _BottleStyle(
+        color: Color(0xFF0284C7), // Sky Ocean Blue
+        bgColor: Color(0xFFE0F2FE),
+        icon: Icons.crop_square_rounded,
+      );
+    } else if (lower.contains('round')) {
+      return const _BottleStyle(
+        color: Color(0xFF059669), // Emerald Green
+        bgColor: Color(0xFFD1FAE5),
+        icon: Icons.trip_origin_rounded,
+      );
+    } else if (lower.contains('wilkins')) {
+      return const _BottleStyle(
+        color: Color(0xFF0D9488), // Ocean Teal
+        bgColor: Color(0xFFCCFBF1),
+        icon: Icons.water_drop_rounded,
+      );
+    }
+
+    // Default Fallback Style
+    return const _BottleStyle(
+      color: Color(0xFF2563EB), // Royal Blue
+      bgColor: Color(0xFFDBEAFE),
+      icon: Icons.local_drink_rounded,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+    final style = _getBottleStyle(refill.bottleType);
+    const successColor = Color(0xFF10B981);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: style.color.withOpacity(0.35), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: style.color.withOpacity(0.12),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Row(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const CircleAvatar(radius: 24, child: Icon(Icons.water_drop)),
-
-            const SizedBox(width: AppSpacing.md),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    refill.bottleNumber,
-                    style: AppTextStyles.dashboardTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+            // Top Row: Type Badge + Status Pill
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Distinct High Contrast Badge for Bottle Type
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
                   ),
-
-                  const SizedBox(height: AppSpacing.xs),
-
-                  Text(
-                    refill.bottleType,
-                    style: AppTextStyles.bodySecondary,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  decoration: BoxDecoration(
+                    color: style.bgColor,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: style.color.withOpacity(0.4),
+                      width: 1,
+                    ),
                   ),
-
-                  const SizedBox(height: AppSpacing.xs),
-
-                  Text(
-                    'Refilled: $formattedDate',
-                    style: AppTextStyles.dashboardDescription,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(style.icon, size: 16, color: style.color),
+                      const SizedBox(width: 6),
+                      Text(
+                        refill.bottleType.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          color: style.color,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+
+                // Ready Status Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: successColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: successColor.withOpacity(0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.check_circle_rounded,
+                        size: 12,
+                        color: successColor,
+                      ),
+                      SizedBox(width: 4),
+                      Text(
+                        'READY',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: successColor,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
 
-            const SizedBox(width: AppSpacing.sm),
+            const SizedBox(height: 14),
 
-            const Icon(Icons.check_circle, size: 26, color: AppColors.success),
+            // Middle Section: Bottle Code with Colored Icon Marker
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: style.color.withOpacity(0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.qr_code_rounded,
+                    color: style.color,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'BOTTLE NUMBER',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF94A3B8),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      Text(
+                        refill.bottleNumber,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F172A),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+            const Divider(height: 1, color: Color(0xFFE2E8F0)),
+            const SizedBox(height: 10),
+
+            // Bottom Section: Refill Timestamp
+            Row(
+              children: [
+                const Icon(
+                  Icons.access_time_filled_rounded,
+                  size: 14,
+                  color: Color(0xFF64748B),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    formattedDate,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                ),
+                Text(
+                  '#${refill.refillId}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF94A3B8),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
+}
+
+// Helper class for mapping visual styles to bottle types
+class _BottleStyle {
+  final Color color;
+  final Color bgColor;
+  final IconData icon;
+
+  const _BottleStyle({
+    required this.color,
+    required this.bgColor,
+    required this.icon,
+  });
 }

@@ -15,7 +15,20 @@ class PaymentScreen extends StatefulWidget {
   final Account account;
   final OrderDetails order;
 
-  const PaymentScreen({super.key, required this.account, required this.order});
+  /*
+   * Temporary bottles scanned during delivery.
+   *
+   * These are passed from DeliveryConfirmationScreen and
+   * remain temporary until completeDelivery() is called.
+   */
+  final List<Map<String, dynamic>> scannedBottles;
+
+  const PaymentScreen({
+    super.key,
+    required this.account,
+    required this.order,
+    required this.scannedBottles,
+  });
 
   @override
   State<PaymentScreen> createState() => _PaymentScreenState();
@@ -153,6 +166,19 @@ class _PaymentScreenState extends State<PaymentScreen> {
     await _completeDelivery();
   }
 
+  // ============================================================
+  // COMPLETE DELIVERY
+  // ============================================================
+  //
+  // Payment has already been handled or skipped.
+  //
+  // The important part is that the temporary scanned bottles
+  // are also sent here.
+  //
+  // The server will then save the bottles and complete the
+  // delivery inside one transaction.
+  //
+
   Future<void> _completeDelivery() async {
     setState(() {
       _isProcessing = true;
@@ -163,6 +189,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
         accId: widget.account.accId,
         orderId: widget.order.orderId,
         deliveryId: widget.order.deliveryId,
+
+        // Send the bottles that were scanned before entering
+        // the payment screen.
+        bottles: widget.scannedBottles,
       );
 
       if (!mounted) {
@@ -289,6 +319,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
       return;
     }
 
+    /*
+     * Payment has been recorded.
+     *
+     * Now commit the temporarily scanned bottles and
+     * complete the delivery.
+     */
     await _completeDelivery();
   }
 
