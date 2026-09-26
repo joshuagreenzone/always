@@ -6,11 +6,9 @@ require_once '../../config/database.php';
 
 try {
 
-    // Create database connection
     $database = new Database();
     $db = $database->connect();
 
-    // Get rider account ID
     $accId = isset($_GET['accId'])
         ? (int) $_GET['accId']
         : 0;
@@ -26,19 +24,17 @@ try {
         exit;
     }
 
+    /*
+     * =========================================================
+     * GET ASSIGNED ORDERS
+     * =========================================================
+     */
+
     $sql = "
         SELECT
             o.OrderID,
             o.CustomerID,
             c.CustomerName,
-
-            o.BottleTypeID,
-            bt.BottleType,
-
-            o.Quantity,
-            o.UnitPrice,
-
-            (o.Quantity * o.UnitPrice) AS TotalAmount,
 
             o.OrderDateTime,
             o.OrderStatus,
@@ -56,9 +52,6 @@ try {
         INNER JOIN customers c
             ON o.CustomerID = c.CustomerID
 
-        INNER JOIN bottle_types bt
-            ON o.BottleTypeID = bt.BottleTypeID
-
         WHERE d.AccID = :accId
           AND d.DeliveryStatus = 'ASSIGNED'
 
@@ -71,7 +64,107 @@ try {
         ':accId' => $accId
     ]);
 
-    $orders = $stmt->fetchAll();
+    $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    /*
+     * =========================================================
+     * GET ITEMS FOR EACH ORDER
+     * =========================================================
+     */
+
+    $itemSql = "
+        SELECT
+            oi.OrderItemID,
+            oi.OrderID,
+            oi.BottleTypeID,
+            bt.BottleType,
+            oi.Quantity,
+            oi.UnitPrice,
+
+            (oi.Quantity * oi.UnitPrice) AS ItemTotal
+
+        FROM order_items oi
+
+        INNER JOIN bottle_types bt
+            ON oi.BottleTypeID = bt.BottleTypeID
+
+        WHERE oi.OrderID = :orderId
+
+        ORDER BY oi.OrderItemID ASC
+    ";
+
+    $itemStmt = $db->prepare($itemSql);
+
+    foreach ($orders as &$order) {
+
+        $orderId =
+            (int) $order['OrderID'];
+
+        $itemStmt->execute([
+            ':orderId' => $orderId
+        ]);
+
+        $items =
+            $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $totalQuantity = 0;
+        $totalAmount = 0;
+
+        foreach ($items as &$item) {
+
+            $item['OrderItemID'] =
+                (int) $item['OrderItemID'];
+
+            $item['OrderID'] =
+                (int) $item['OrderID'];
+
+            $item['BottleTypeID'] =
+                (int) $item['BottleTypeID'];
+
+            $item['Quantity'] =
+                (int) $item['Quantity'];
+
+            $item['UnitPrice'] =
+                (float) $item['UnitPrice'];
+
+            $item['ItemTotal'] =
+                (float) $item['ItemTotal'];
+
+            $totalQuantity +=
+                $item['Quantity'];
+
+            $totalAmount +=
+                $item['ItemTotal'];
+        }
+
+        unset($item);
+
+        $order['OrderID'] =
+            $orderId;
+
+        $order['CustomerID'] =
+            (int) $order['CustomerID'];
+
+        $order['DeliveryID'] =
+            (int) $order['DeliveryID'];
+
+        $order['TotalQuantity'] =
+            $totalQuantity;
+
+        $order['TotalAmount'] =
+            $totalAmount;
+
+        $order['items'] =
+            $items;
+    }
+
+    unset($order);
+
+    /*
+     * =========================================================
+     * RESPONSE
+     * =========================================================
+     */
 
     echo json_encode([
         'success' => true,
@@ -84,6 +177,6 @@ try {
 
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage()
+        'message' => 'Database error.'
     ]);
 }

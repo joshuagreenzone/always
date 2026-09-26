@@ -42,29 +42,8 @@ class DeliveryConfirmationScreen extends StatelessWidget {
   // ============================================================
   // COMPLETE DELIVERY
   // ============================================================
-  //
-  // This function sends ALL temporarily scanned bottles to the
-  // server only after the rider confirms the delivery.
-  //
-  // The server will validate all bottles and save them inside
-  // one database transaction.
-  //
-  // If one bottle fails validation, the server rolls everything
-  // back, so no partial delivery is saved.
-  //
 
   Future<void> _completeDelivery(BuildContext context) async {
-    /*
-     * IMPORTANT:
-     *
-     * Do not call completeDelivery() while scanning.
-     *
-     * The DeliveryScanScreen only keeps scanned bottles in
-     * temporary memory.
-     *
-     * This is the point where the temporary bottle list is
-     * finally sent to the server.
-     */
     try {
       final riderService = RiderService();
 
@@ -119,19 +98,15 @@ class DeliveryConfirmationScreen extends StatelessWidget {
   // ============================================================
   // CONFIRM DELIVERY
   // ============================================================
-  //
-  // This is the single entry point when the rider presses
-  // "Confirm Delivery".
-  //
-  // Before proceeding, make sure the rider scanned exactly the
-  // number of bottles required by the order.
-  //
-  // This prevents the rider from reaching the payment screen or
-  // completing a delivery with an incomplete bottle list.
-  // ============================================================
 
   Future<void> _handleConfirmDelivery(BuildContext context) async {
-    if (scannedBottles.length != order.quantity) {
+    /*
+     * A mixed order can contain multiple bottle types.
+     *
+     * Therefore, totalQuantity must be used instead of the old
+     * single-item quantity field.
+     */
+    if (scannedBottles.length != order.totalQuantity) {
       await showDialog(
         context: context,
         builder: (_) => AlertDialog(
@@ -140,13 +115,17 @@ class DeliveryConfirmationScreen extends StatelessWidget {
           ),
           title: const Text('Incomplete Bottle Scan'),
           content: Text(
-            'This order requires ${order.quantity} bottle'
-            '${order.quantity == 1 ? '' : 's'}, '
+            'This order requires '
+            '${order.totalQuantity} bottle'
+            '${order.totalQuantity == 1 ? '' : 's'}, '
             'but only ${scannedBottles.length} '
-            'bottle${scannedBottles.length == 1 ? '' : 's'} '
-            'ha${scannedBottles.length == 1 ? 's' : 've'} been scanned.\n\n'
-            'Please scan all required bottles before confirming '
-            'the delivery.',
+            'bottle'
+            '${scannedBottles.length == 1 ? '' : 's'} '
+            'ha'
+            '${scannedBottles.length == 1 ? 's' : 've'} '
+            'been scanned.\n\n'
+            'Please scan all required bottles before '
+            'confirming the delivery.',
           ),
           actions: [
             ElevatedButton(
@@ -164,9 +143,6 @@ class DeliveryConfirmationScreen extends StatelessWidget {
      * The order is already fully paid.
      *
      * We can complete the delivery immediately.
-     *
-     * The temporary bottles are sent to completeDelivery(),
-     * which performs the final database transaction.
      */
     if (order.paymentStatus == 'PAID') {
       await _completeDelivery(context);
@@ -176,11 +152,8 @@ class DeliveryConfirmationScreen extends StatelessWidget {
     /*
      * UNPAID or PARTIALLY_PAID
      *
-     * Open the payment screen.
-     *
-     * The temporary bottle list is passed to PaymentScreen so
-     * the scan information is preserved while payment is being
-     * recorded.
+     * Open the payment screen while preserving the temporary
+     * bottle scan information.
      */
     await Navigator.push(
       context,
@@ -196,7 +169,7 @@ class DeliveryConfirmationScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool allBottlesScanned = scannedBottles.length == order.quantity;
+    final bool allBottlesScanned = scannedBottles.length == order.totalQuantity;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Confirm Delivery')),
@@ -226,8 +199,8 @@ class DeliveryConfirmationScreen extends StatelessWidget {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   /*
-                   * The button is only enabled when all required
-                   * bottles have been scanned.
+                   * Confirm is only enabled when every required
+                   * bottle has been scanned.
                    */
                   onPressed: allBottlesScanned
                       ? () => _handleConfirmDelivery(context)
@@ -242,8 +215,8 @@ class DeliveryConfirmationScreen extends StatelessWidget {
 
                 Center(
                   child: Text(
-                    'Scan all ${order.quantity} required bottles '
-                    'before confirming the delivery.',
+                    'Scan all ${order.totalQuantity} required '
+                    'bottles before confirming the delivery.',
                     textAlign: TextAlign.center,
                     style: AppTextStyles.bodySecondary,
                   ),
@@ -266,7 +239,7 @@ class DeliveryConfirmationScreen extends StatelessWidget {
         padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
         child: Column(
           children: [
-            IconBadge(
+            const IconBadge(
               icon: Icons.check_circle,
               color: AppColors.success,
               size: AppSizes.largeIconSize,
@@ -280,7 +253,7 @@ class DeliveryConfirmationScreen extends StatelessWidget {
 
             Text(
               '${scannedBottles.length} of '
-              '${order.quantity} bottles scanned successfully.',
+              '${order.totalQuantity} bottles scanned successfully.',
               textAlign: TextAlign.center,
               style: AppTextStyles.bodySecondary,
             ),
@@ -312,7 +285,9 @@ class DeliveryConfirmationScreen extends StatelessWidget {
                   color: AppColors.info,
                   size: 36,
                 ),
+
                 const SizedBox(width: AppSpacing.sm),
+
                 Expanded(
                   child: Text(order.customerName, style: AppTextStyles.body),
                 ),
@@ -341,9 +316,21 @@ class DeliveryConfirmationScreen extends StatelessWidget {
 
             InfoRow(label: 'Order', value: '#${order.orderId}'),
 
-            InfoRow(label: 'Bottle Type', value: order.bottleType),
+            const SizedBox(height: AppSpacing.sm),
 
-            InfoRow(label: 'Quantity', value: '${order.quantity}'),
+            Text('Order Items', style: AppTextStyles.bodySecondary),
+
+            const SizedBox(height: AppSpacing.xs),
+
+            ...order.items.map((item) => _buildOrderItem(item)),
+
+            const Divider(height: AppSpacing.lg),
+
+            InfoRow(
+              label: 'Total Bottles',
+              value: '${order.totalQuantity}',
+              bold: true,
+            ),
 
             InfoRow(
               label: 'Total',
@@ -354,6 +341,53 @@ class DeliveryConfirmationScreen extends StatelessWidget {
             InfoRow(label: 'Payment', value: order.paymentStatus),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildOrderItem(OrderItemDetails item) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(AppSizes.cardRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.water_drop_outlined, color: AppColors.accent),
+
+              const SizedBox(width: AppSpacing.sm),
+
+              Expanded(
+                child: Text(
+                  item.bottleType,
+                  style: AppTextStyles.body.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+
+              Text('× ${item.quantity}', style: AppTextStyles.body),
+            ],
+          ),
+
+          const SizedBox(height: AppSpacing.xs),
+
+          InfoRow(
+            label: 'Unit Price',
+            value: '₱${item.unitPrice.toStringAsFixed(2)}',
+          ),
+
+          InfoRow(
+            label: 'Subtotal',
+            value: '₱${item.totalAmount.toStringAsFixed(2)}',
+            bold: true,
+          ),
+        ],
       ),
     );
   }

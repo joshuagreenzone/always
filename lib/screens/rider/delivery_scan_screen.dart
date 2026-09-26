@@ -28,18 +28,6 @@ class DeliveryScanScreen extends StatefulWidget {
 class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
   final MobileScannerController _scannerController = MobileScannerController();
 
-  // ============================================================
-  // TEMPORARY SCANNED BOTTLES
-  //
-  // IMPORTANT:
-  // These bottles are NOT saved to the database yet.
-  //
-  // They only exist in memory while this screen is open.
-  //
-  // Each bottle also stores the GPS coordinates captured when
-  // the bottle was scanned.
-  // ============================================================
-
   final List<_PendingDeliveryBottle> _scannedBottles = [];
 
   bool _isProcessing = false;
@@ -50,16 +38,12 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
     super.dispose();
   }
 
-  // ============================================================
-  // QR SCAN
-  // ============================================================
-
   Future<void> _handleScan(BarcodeCapture capture) async {
     if (_isProcessing) {
       return;
     }
 
-    if (_scannedBottles.length >= widget.order.quantity) {
+    if (_scannedBottles.length >= widget.order.totalQuantity) {
       return;
     }
 
@@ -73,18 +57,8 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
       return;
     }
 
-    final bottleNumber = value.trim();
-
-    await _processBottle(bottleNumber);
+    await _processBottle(value.trim());
   }
-
-  // ============================================================
-  // GET CURRENT GPS LOCATION
-  //
-  // GPS is captured at the time the bottle is scanned.
-  //
-  // Nothing is written to the database here.
-  // ============================================================
 
   Future<Position> _getCurrentLocation() async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -113,36 +87,15 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
       );
     }
 
-    return await Geolocator.getCurrentPosition(
+    return Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     );
   }
-
-  // ============================================================
-  // PROCESS BOTTLE
-  //
-  // IMPORTANT:
-  //
-  // This method DOES NOT call the server.
-  //
-  // It only:
-  //
-  // 1. Checks local duplicates.
-  // 2. Gets GPS.
-  // 3. Adds the bottle to temporary memory.
-  //
-  // The database will only be updated later when the rider
-  // confirms the delivery.
-  // ============================================================
 
   Future<void> _processBottle(String bottleNumber) async {
     if (_isProcessing) {
       return;
     }
-
-    // ----------------------------------------------------------
-    // LOCAL DUPLICATE CHECK
-    // ----------------------------------------------------------
 
     final alreadyScanned = _scannedBottles.any(
       (item) => item.bottleNumber.toLowerCase() == bottleNumber.toLowerCase(),
@@ -159,10 +112,6 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
       return;
     }
 
-    // ----------------------------------------------------------
-    // STOP CAMERA WHILE PROCESSING
-    // ----------------------------------------------------------
-
     setState(() {
       _isProcessing = true;
     });
@@ -172,21 +121,11 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
     } catch (_) {}
 
     try {
-      // --------------------------------------------------------
-      // GET GPS
-      //
-      // This does NOT write anything to the database.
-      // --------------------------------------------------------
-
       final position = await _getCurrentLocation();
 
       if (!mounted) {
         return;
       }
-
-      // --------------------------------------------------------
-      // SAVE ONLY TO TEMPORARY MEMORY
-      // --------------------------------------------------------
 
       setState(() {
         _scannedBottles.add(
@@ -203,13 +142,9 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
 
       final scanned = _scannedBottles.length;
 
-      final required = widget.order.quantity;
+      final required = widget.order.totalQuantity;
 
       final remaining = required - scanned;
-
-      // --------------------------------------------------------
-      // ALL BOTTLES SCANNED
-      // --------------------------------------------------------
 
       if (scanned >= required) {
         await _showMessage(
@@ -224,10 +159,6 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
         return;
       }
 
-      // --------------------------------------------------------
-      // BOTTLE TEMPORARILY SCANNED
-      // --------------------------------------------------------
-
       await _showMessage(
         'Bottle Scanned',
         'Bottle: $bottleNumber\n\n'
@@ -241,7 +172,6 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
         return;
       }
 
-      // Restart scanner for the next bottle.
       await _scannerController.start();
     } catch (e) {
       if (!mounted) {
@@ -268,26 +198,8 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
     }
   }
 
-  // ============================================================
-  // CONTINUE TO CONFIRMATION
-  //
-  // IMPORTANT:
-  //
-  // The complete temporary bottle information is passed to
-  // DeliveryConfirmationScreen.
-  //
-  // This includes:
-  //
-  // - bottleNumber
-  // - latitude
-  // - longitude
-  // - accuracy
-  //
-  // No database request is made here.
-  // ============================================================
-
   Future<void> _continueToConfirmation() async {
-    if (_isProcessing || _scannedBottles.isEmpty) {
+    if (_isProcessing || _scannedBottles.length != widget.order.totalQuantity) {
       return;
     }
 
@@ -298,13 +210,6 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
     if (!mounted) {
       return;
     }
-
-    // ----------------------------------------------------------
-    // CONVERT TEMPORARY OBJECTS TO MAPS
-    //
-    // DeliveryConfirmationScreen and RiderService use these
-    // maps to preserve the complete scan information.
-    // ----------------------------------------------------------
 
     final scannedBottleData = _scannedBottles.map((item) {
       return <String, dynamic>{
@@ -321,9 +226,6 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
         builder: (_) => DeliveryConfirmationScreen(
           account: widget.account,
           order: widget.order,
-
-          // Pass the complete bottle information,
-          // including GPS coordinates.
           scannedBottles: scannedBottleData,
         ),
       ),
@@ -333,27 +235,10 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
       return;
     }
 
-    // ----------------------------------------------------------
-    // If the rider returns to this screen without completing
-    // the delivery, the temporary scans remain available.
-    //
-    // Nothing has been inserted by this screen.
-    // ----------------------------------------------------------
-
-    if (_scannedBottles.length < widget.order.quantity) {
+    if (_scannedBottles.length < widget.order.totalQuantity) {
       await _scannerController.start();
     }
   }
-
-  // ============================================================
-  // BACK / CANCEL
-  //
-  // If the rider leaves this screen, discard all temporary
-  // scans.
-  //
-  // Since this screen never called the server while scanning,
-  // there is nothing to delete from the database.
-  // ============================================================
 
   Future<void> _handleBack() async {
     if (_isProcessing) {
@@ -402,19 +287,10 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
     );
 
     if (discard == true && mounted) {
-      // --------------------------------------------------------
-      // CLEAR TEMPORARY SCANS
-      // --------------------------------------------------------
-
       _scannedBottles.clear();
-
       Navigator.pop(context);
     }
   }
-
-  // ============================================================
-  // MESSAGE
-  // ============================================================
 
   Future<void> _showMessage(String title, String message) {
     return showDialog(
@@ -437,21 +313,15 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
     );
   }
 
-  // ============================================================
-  // BUILD
-  // ============================================================
-
   @override
   Widget build(BuildContext context) {
-    final required = widget.order.quantity;
+    final required = widget.order.totalQuantity;
 
     final scanned = _scannedBottles.length;
 
     final remaining = required - scanned;
 
-    final complete = scanned >= required;
-
-    final canContinue = scanned > 0 && !_isProcessing;
+    final complete = scanned == required;
 
     return PopScope(
       canPop: !_isProcessing && _scannedBottles.isEmpty,
@@ -475,14 +345,9 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
             onPressed: _isProcessing ? null : _handleBack,
           ),
         ),
-
         body: SafeArea(
           child: Column(
             children: [
-              // ==================================================
-              // ORDER INFORMATION
-              // ==================================================
-
               Padding(
                 padding: const EdgeInsets.all(AppSizes.screenPadding),
                 child: Column(
@@ -495,9 +360,11 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
 
                     const SizedBox(height: AppSpacing.xs),
 
-                    Text(
-                      '${widget.order.bottleType} × $required',
-                      style: AppTextStyles.bodySecondary,
+                    ...widget.order.items.map(
+                      (item) => Text(
+                        '${item.bottleType} × ${item.quantity}',
+                        style: AppTextStyles.bodySecondary,
+                      ),
                     ),
 
                     const SizedBox(height: AppSpacing.md),
@@ -533,9 +400,6 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
                 ),
               ),
 
-              // ==================================================
-              // SCANNER
-              // ==================================================
               Expanded(
                 child: Stack(
                   alignment: Alignment.center,
@@ -577,9 +441,6 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
                 ),
               ),
 
-              // ==================================================
-              // SCANNED BOTTLES
-              // ==================================================
               if (_scannedBottles.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.all(AppSizes.screenPadding),
@@ -623,9 +484,6 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
                   ),
                 ),
 
-              // ==================================================
-              // CONTINUE
-              // ==================================================
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                   AppSizes.screenPadding,
@@ -636,9 +494,11 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
                 child: SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: canContinue ? _continueToConfirmation : null,
+                    onPressed: complete && !_isProcessing
+                        ? _continueToConfirmation
+                        : null,
                     child: Text(
-                      complete ? 'Continue' : 'Continue with Scanned Bottles',
+                      complete ? 'Continue' : 'Scan All Bottles First',
                     ),
                   ),
                 ),
@@ -650,18 +510,6 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
     );
   }
 }
-
-// ================================================================
-// TEMPORARY DELIVERY BOTTLE
-//
-// This object exists only in memory while the scanning screen
-// is open.
-//
-// It is NOT a database model.
-//
-// It stores the bottle number together with the GPS information
-// captured at scan time.
-// ================================================================
 
 class _PendingDeliveryBottle {
   final String bottleNumber;

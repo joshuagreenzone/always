@@ -28,77 +28,72 @@ class PickupScanScreen extends StatefulWidget {
 }
 
 class _PickupScanScreenState extends State<PickupScanScreen> {
-  /*
-   * Controls the QR/barcode scanner.
-   */
   final MobileScannerController _scannerController = MobileScannerController();
 
-  /*
-   * Handles communication with the PHP API.
-   */
   final RiderService _riderService = RiderService();
 
-  /*
-   * Handles taking payment receipt photos.
-   */
   final ImagePicker _imagePicker = ImagePicker();
 
-  /*
-   * Payment form controllers.
-   */
   final TextEditingController _paymentAmountController =
       TextEditingController();
 
   final TextEditingController _paymentNotesController = TextEditingController();
 
-  /*
-   * Stores the receipt image temporarily before
-   * the payment is submitted.
-   *
-   * The image is uploaded only when the rider
-   * confirms the payment.
-   */
   File? _receiptImage;
 
-  /*
-   * Current payment method.
-   *
-   * Supported values:
-   * CASH
-   * GCASH
-   * BANK_TRANSFER
-   */
   String _paymentType = 'CASH';
 
-  /*
-   * Prevents multiple operations from happening
-   * at the same time.
-   */
   bool _isProcessing = false;
 
   /*
-   * IMPORTANT:
+   * Number of bottles that were already picked up
+   * by previous pickup transactions.
    *
-   * These bottles are temporary only.
+   * This value comes from PickupOrder.pickedUpBottleCount.
    *
-   * Scanning a bottle DOES NOT immediately create:
+   * Example:
    *
-   * pickup
-   * delivery_pickup_transaction
-   * bottle_scan_event
+   * Delivered = 3
+   * Already picked up = 1
    *
-   * records.
+   * Remaining = 2
+   */
+  late int _alreadyPickedUpCount;
+
+  /*
+   * Temporary bottles scanned during the current
+   * pickup session.
    *
-   * Those records are created only when
-   * _completePickup() successfully calls the server.
+   * These are NOT saved to the database until
+   * _completePickup() succeeds.
    */
   final List<_PendingPickupBottle> _scannedBottles = [];
 
   @override
-  void dispose() {
+  void initState() {
+    super.initState();
+
     /*
-     * Dispose controllers when this screen is removed.
+     * Initialize the cumulative pickup count from
+     * the server-provided PickupOrder.
      */
+    _alreadyPickedUpCount = widget.order.pickedUpBottleCount;
+
+    /*
+     * Protect against an invalid value coming from
+     * the API.
+     */
+    if (_alreadyPickedUpCount < 0) {
+      _alreadyPickedUpCount = 0;
+    }
+
+    if (_alreadyPickedUpCount > widget.order.deliveredBottleCount) {
+      _alreadyPickedUpCount = widget.order.deliveredBottleCount;
+    }
+  }
+
+  @override
+  void dispose() {
     _paymentAmountController.dispose();
     _paymentNotesController.dispose();
     _scannerController.dispose();
@@ -107,24 +102,43 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
   }
 
   /*
-   * Handles barcode/QR-code detection from the camera.
+   * Number of bottles still needing pickup.
    *
-   * The scanned bottle number is passed to
-   * _processBottle(), which obtains the current
-   * GPS location and temporarily stores the bottle.
+   * This excludes bottles already picked up in
+   * previous pickup transactions and bottles
+   * temporarily scanned in the current session.
+   */
+  int get _remainingBottleCount {
+    final remaining =
+        widget.order.deliveredBottleCount -
+        _alreadyPickedUpCount -
+        _scannedBottles.length;
+
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  /*
+   * Total pickup progress including bottles that
+   * were picked up previously and bottles scanned
+   * during this session.
+   */
+  int get _currentPickedUpCount {
+    return _alreadyPickedUpCount + _scannedBottles.length;
+  }
+
+  /*
+   * Handles barcode/QR-code detection.
    */
   Future<void> _handleScan(BarcodeCapture capture) async {
     if (_isProcessing) {
       return;
     }
 
-    final required = widget.order.deliveredBottleCount;
-
     /*
-     * Do not allow more bottles to be scanned
-     * than were delivered.
+     * Only allow scanning the bottles that still
+     * need to be picked up.
      */
-    if (_scannedBottles.length >= required) {
+    if (_remainingBottleCount <= 0) {
       return;
     }
 
@@ -143,13 +157,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
   /*
    * Gets the rider's current GPS position.
-   *
-   * The location is captured at the time the bottle
-   * is scanned and temporarily stored with that bottle.
-   *
-   * The server ultimately stores the location only
-   * when the pickup transaction is successfully
-   * committed.
    */
   Future<Position> _getCurrentLocation() async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -186,17 +193,9 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
   /*
    * Processes one scanned bottle.
    *
-   * This function:
-   *
-   * 1. Checks for duplicate scans.
-   * 2. Makes sure the rider has not exceeded
-   *    the delivered bottle count.
-   * 3. Stops the scanner temporarily.
-   * 4. Gets the current GPS location.
-   * 5. Adds the bottle to the temporary scan list.
-   * 6. Does NOT write anything to the database.
-   * 7. Restarts the scanner if more bottles
-   *    still need to be scanned.
+   * The bottle is stored temporarily and is NOT
+   * written to the database until Complete Pickup
+   * is confirmed.
    */
   Future<void> _processBottle(String bottleNumber) async {
     if (_isProcessing) {
@@ -204,7 +203,15 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     }
 
     /*
-     * Prevent duplicate bottles in the temporary list.
+     * Do not scan more bottles than remain.
+     */
+    if (_remainingBottleCount <= 0) {
+      return;
+    }
+
+    /*
+     * Prevent duplicate bottles in the current
+     * temporary scan list.
      */
     final alreadyScanned = _scannedBottles.any(
       (item) => item.bottleNumber.toLowerCase() == bottleNumber.toLowerCase(),
@@ -220,14 +227,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       return;
     }
 
-    /*
-     * Prevent scanning more bottles than were
-     * delivered for this order.
-     */
-    if (_scannedBottles.length >= widget.order.deliveredBottleCount) {
-      return;
-    }
-
     setState(() {
       _isProcessing = true;
     });
@@ -240,20 +239,12 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     } catch (_) {}
 
     try {
-      /*
-       * Capture GPS at the time of the bottle scan.
-       */
       final position = await _getCurrentLocation();
 
       if (!mounted) {
         return;
       }
 
-      /*
-       * Add the bottle only to the temporary list.
-       *
-       * Nothing is written to the database yet.
-       */
       setState(() {
         _scannedBottles.add(
           _PendingPickupBottle(
@@ -267,24 +258,20 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
         _isProcessing = false;
       });
 
-      final required = widget.order.deliveredBottleCount;
+      final delivered = widget.order.deliveredBottleCount;
 
-      final scanned = _scannedBottles.length;
+      final totalPickedUp = _currentPickedUpCount;
 
-      final remaining = required - scanned;
+      final remaining = _remainingBottleCount;
 
-      /*
-       * Inform the rider that the bottle was
-       * temporarily scanned.
-       */
       await _showMessage(
         'Bottle Scanned',
         'Bottle: $bottleNumber\n\n'
-            'Scanned: $scanned / $required\n'
+            'Picked up: $totalPickedUp / $delivered\n'
             'Remaining: $remaining\n\n'
             'This bottle has NOT been saved yet.\n'
-            'Press Complete Pickup to confirm all '
-            'scanned bottles.',
+            'Press Complete Pickup to confirm '
+            'the scanned bottles.',
       );
 
       if (!mounted) {
@@ -292,9 +279,10 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       }
 
       /*
-       * If more bottles are required, resume scanning.
+       * Resume scanning only when there are still
+       * bottles that need to be picked up.
        */
-      if (remaining > 0) {
+      if (_remainingBottleCount > 0) {
         await _scannerController.start();
       }
     } catch (e) {
@@ -318,11 +306,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
         return;
       }
 
-      /*
-       * Resume scanning after a failed scan/GPS
-       * operation.
-       */
-      if (_scannedBottles.length < widget.order.deliveredBottleCount) {
+      if (_remainingBottleCount > 0) {
         await _scannerController.start();
       }
     }
@@ -330,11 +314,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
   /*
    * Takes a picture of the customer's payment receipt.
-   *
-   * This is used for GCash and Bank Transfer payments.
-   *
-   * The image is kept temporarily in _receiptImage
-   * until the rider submits the payment.
    */
   Future<void> _takeReceiptPhoto(StateSetter setDialogState) async {
     final XFile? image = await _imagePicker.pickImage(
@@ -348,10 +327,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       return;
     }
 
-    /*
-     * StatefulBuilder owns the payment dialog's state,
-     * so update it using setDialogState.
-     */
     setDialogState(() {
       _receiptImage = File(image.path);
     });
@@ -359,31 +334,12 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
   /*
    * Commits the temporary scanned bottles to the server.
-   *
-   * The server performs the complete pickup operation
-   * inside ONE database transaction.
-   *
-   * The server creates:
-   *
-   * pickup
-   * delivery_pickup_transaction
-   * bottle_scan_event
-   *
-   * If any bottle is invalid, the server rolls back
-   * the entire transaction.
-   *
-   * After pickup is successfully committed, this
-   * function optionally opens the payment dialog.
    */
   Future<void> _completePickup() async {
     if (_scannedBottles.isEmpty || _isProcessing) {
       return;
     }
 
-    /*
-     * Ask the rider to confirm before committing
-     * the temporary scans.
-     */
     final confirmed = await _showPickupConfirmation();
 
     if (confirmed != true || !mounted) {
@@ -394,18 +350,11 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       _isProcessing = true;
     });
 
-    /*
-     * Stop scanning while the server transaction
-     * is being processed.
-     */
     try {
       await _scannerController.stop();
     } catch (_) {}
 
     try {
-      /*
-       * Send all temporarily scanned bottles to PHP.
-       */
       final result = await _riderService.completePickup(
         accId: widget.account.accId,
         orderId: widget.order.orderId,
@@ -427,7 +376,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       }
 
       /*
-       * Use server-authoritative values.
+       * Always use the server-authoritative counts.
        */
       final delivered = _toInt(
         result['deliveredCount'],
@@ -436,7 +385,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
       final pickedUp = _toInt(
         result['pickedUpCount'],
-        fallback: _scannedBottles.length,
+        fallback: _currentPickedUpCount,
       );
 
       final remaining = _toInt(
@@ -447,30 +396,23 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       final paymentStatus =
           result['paymentStatus']?.toString().toUpperCase() ?? 'UNPAID';
 
-      /*
-       * complete_pickup.php returns:
-       *
-       * outstandingAmount
-       *
-       * This is the actual balance remaining after
-       * previous customer payments.
-       */
       final outstandingAmount = _toDouble(result['outstandingAmount']);
 
       /*
-       * The server transaction has committed successfully.
+       * The server has successfully committed the
+       * current pickup transaction.
        *
-       * The temporary list can now be cleared.
+       * Update our cumulative count before clearing
+       * the temporary list.
        */
+      _alreadyPickedUpCount = pickedUp;
+
       _scannedBottles.clear();
 
       setState(() {
         _isProcessing = false;
       });
 
-      /*
-       * Inform the rider that the pickup was committed.
-       */
       if (remaining > 0) {
         await _showMessage(
           'Partial Pickup Completed',
@@ -495,14 +437,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       }
 
       /*
-       * PAYMENT FLOW
-       *
-       * If the order is already PAID, no payment
-       * dialog is necessary.
-       *
-       * If the order is UNPAID or PARTIALLY_PAID,
-       * and there is still an outstanding balance,
-       * allow the rider to collect payment.
+       * Payment flow.
        */
       if ((paymentStatus == 'UNPAID' || paymentStatus == 'PARTIALLY_PAID') &&
           outstandingAmount > 0) {
@@ -513,17 +448,10 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
         }
 
         if (paymentMade) {
-          /*
-           * Pickup and payment have both completed.
-           */
           Navigator.pop(context, true);
           return;
         }
 
-        /*
-         * Pickup is already complete even if payment
-         * was skipped.
-         */
         await _showMessage(
           'Payment Not Collected',
           'The pickup was completed successfully.\n\n'
@@ -536,22 +464,12 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
         return;
       }
 
-      /*
-       * Return to the previous rider screen.
-       */
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) {
         return;
       }
 
-      /*
-       * If complete_pickup.php fails, its database
-       * transaction rolls back.
-       *
-       * Therefore, the temporary bottle list is
-       * intentionally retained so the rider can retry.
-       */
       setState(() {
         _isProcessing = false;
       });
@@ -568,10 +486,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
         return;
       }
 
-      /*
-       * Resume scanning if there are still temporary
-       * bottles available for retry.
-       */
       if (_scannedBottles.isNotEmpty) {
         await _scannerController.start();
       }
@@ -579,10 +493,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
   }
 
   /*
-   * Asks the rider to confirm that the temporarily
-   * scanned bottles should actually be saved.
-   *
-   * Returning false means nothing is sent to the server.
+   * Asks the rider to confirm the pickup.
    */
   Future<bool?> _showPickupConfirmation() {
     return showDialog<bool>(
@@ -591,6 +502,10 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       builder: (_) {
         final count = _scannedBottles.length;
 
+        final afterPickupCount = _currentPickedUpCount;
+
+        final delivered = widget.order.deliveredBottleCount;
+
         return AlertDialog(
           title: const Text('Confirm Pickup'),
           content: Text(
@@ -598,6 +513,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
             '$count bottle'
             '${count == 1 ? '' : 's'} '
             'as picked up.\n\n'
+            'Pickup progress will become '
+            '$afterPickupCount / $delivered.\n\n'
             'The scanned bottles will be saved '
             'to the database.\n\n'
             'Continue?',
@@ -623,24 +540,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
   /*
    * Displays the payment collection dialog.
-   *
-   * The rider can:
-   *
-   * - Enter a full payment.
-   * - Enter a partial payment.
-   * - Select Cash.
-   * - Select GCash.
-   * - Select Bank Transfer.
-   * - Take a receipt photo for non-cash payments.
-   * - Skip payment.
-   *
-   * The actual server also validates the amount against
-   * the real outstanding balance.
    */
   Future<bool> _showPaymentDialog(double outstandingAmount) async {
-    /*
-     * Reset the payment form every time the dialog opens.
-     */
     _paymentAmountController.text = outstandingAmount.toStringAsFixed(2);
 
     _paymentNotesController.clear();
@@ -662,10 +563,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    /*
-                     * Show the server-provided outstanding
-                     * balance.
-                     */
                     const Text(
                       'Outstanding Balance',
                       style: AppTextStyles.bodySecondary,
@@ -680,9 +577,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
                     const SizedBox(height: 16),
 
-                    /*
-                     * Payment amount.
-                     */
                     TextField(
                       controller: _paymentAmountController,
                       keyboardType: const TextInputType.numberWithOptions(
@@ -697,9 +591,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
                     const SizedBox(height: 16),
 
-                    /*
-                     * Payment method.
-                     */
                     DropdownButtonFormField<String>(
                       initialValue: _paymentType,
                       decoration: const InputDecoration(
@@ -723,32 +614,18 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
                               setDialogState(() {
                                 _paymentType = value;
-
-                                /*
-                                       * Clear the previous
-                                       * receipt when changing
-                                       * payment method.
-                                       */
                                 _receiptImage = null;
                               });
                             },
                     ),
 
-                    /*
-                     * Receipt is required for
-                     * GCash and Bank Transfer.
-                     */
                     if (_paymentType != 'CASH') ...[
                       const SizedBox(height: 16),
-
                       _buildReceiptSection(setDialogState, isSaving),
                     ],
 
                     const SizedBox(height: 16),
 
-                    /*
-                     * Optional notes.
-                     */
                     TextField(
                       controller: _paymentNotesController,
                       maxLines: 3,
@@ -778,11 +655,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                 ),
               ),
               actions: [
-                /*
-                 * Skip payment.
-                 *
-                 * The pickup remains completed.
-                 */
                 TextButton(
                   onPressed: isSaving
                       ? null
@@ -792,9 +664,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                   child: const Text('Skip'),
                 ),
 
-                /*
-                 * Submit payment.
-                 */
                 ElevatedButton(
                   onPressed: isSaving
                       ? null
@@ -803,9 +672,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                             _paymentAmountController.text.trim(),
                           );
 
-                          /*
-                           * Validate amount.
-                           */
                           if (amount == null || amount <= 0) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -815,11 +681,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                             return;
                           }
 
-                          /*
-                           * Do not allow the rider to
-                           * enter more than the known
-                           * outstanding balance.
-                           */
                           if (amount > outstandingAmount) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
@@ -832,10 +693,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                             return;
                           }
 
-                          /*
-                           * Non-cash payments require
-                           * a receipt image.
-                           */
                           if (_paymentType != 'CASH' && _receiptImage == null) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -853,13 +710,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                           });
 
                           try {
-                            /*
-                             * Send the payment and
-                             * optional receipt image.
-                             *
-                             * RiderService converts this
-                             * into multipart/form-data.
-                             */
                             await _riderService.createPayment(
                               accId: widget.account.accId,
                               orderId: widget.order.orderId,
@@ -873,10 +723,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                               return;
                             }
 
-                            /*
-                             * Payment was successfully
-                             * recorded.
-                             */
                             Navigator.pop(context, true);
                           } catch (e) {
                             if (!context.mounted) {
@@ -912,23 +758,11 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       },
     );
 
-    /*
-     * Return whether a payment was successfully
-     * recorded.
-     */
     return result == true;
   }
 
   /*
-   * Builds the receipt-photo section of the payment
-   * dialog.
-   *
-   * For GCash and Bank Transfer:
-   *
-   * 1. The rider takes a receipt photo.
-   * 2. The image is displayed for review.
-   * 3. The rider can retake it.
-   * 4. The image is uploaded when payment is submitted.
+   * Builds the payment receipt section.
    */
   Widget _buildReceiptSection(StateSetter setDialogState, bool isSaving) {
     return Column(
@@ -946,9 +780,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
         const SizedBox(height: AppSpacing.md),
 
-        /*
-         * Display receipt preview if one exists.
-         */
         if (_receiptImage != null)
           ClipRRect(
             borderRadius: BorderRadius.circular(AppSizes.cardRadius),
@@ -962,9 +793,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
         if (_receiptImage != null) const SizedBox(height: AppSpacing.sm),
 
-        /*
-         * Camera button.
-         */
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
@@ -987,24 +815,9 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
   /*
    * Handles the Android/system back button and
-   * the AppBar back button.
-   *
-   * If no bottles have been scanned, the screen
-   * can be left immediately.
-   *
-   * If bottles are temporarily scanned, the rider
-   * must explicitly confirm that they want to
-   * discard those scans.
-   *
-   * Discarding the scans does NOT affect the database
-   * because the scans have not been committed yet.
+   * AppBar back button.
    */
   Future<void> _handleBack() async {
-    /*
-     * No pending scans.
-     *
-     * It is safe to leave immediately.
-     */
     if (_scannedBottles.isEmpty) {
       if (mounted) {
         Navigator.pop(context);
@@ -1013,11 +826,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       return;
     }
 
-    /*
-     * Pending temporary scans exist.
-     *
-     * Ask the rider before discarding them.
-     */
     final discard = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -1052,9 +860,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       },
     );
 
-    /*
-     * Discard the temporary scans and leave.
-     */
     if (discard == true && mounted) {
       _scannedBottles.clear();
 
@@ -1064,9 +869,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
   /*
    * Displays a standard message dialog.
-   *
-   * Used for scan results, errors, pickup completion,
-   * payment information, and other rider messages.
    */
   Future<void> _showMessage(String title, String message) {
     return showDialog(
@@ -1089,12 +891,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     );
   }
 
-  /*
-   * Safely converts an API value to an integer.
-   *
-   * If conversion fails, the supplied fallback
-   * value is returned.
-   */
   int _toInt(dynamic value, {required int fallback}) {
     if (value == null) {
       return fallback;
@@ -1103,12 +899,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     return int.tryParse(value.toString()) ?? fallback;
   }
 
-  /*
-   * Safely converts an API value to a double.
-   *
-   * If the API value is missing or invalid,
-   * zero is returned.
-   */
   double _toDouble(dynamic value) {
     if (value == null) {
       return 0;
@@ -1121,18 +911,29 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
   Widget build(BuildContext context) {
     final required = widget.order.deliveredBottleCount;
 
-    final scanned = _scannedBottles.length;
-
-    final remaining = required - scanned;
-
-    final canComplete = scanned > 0 && !_isProcessing;
-
-    final allScanned = scanned >= required;
+    /*
+     * Previously picked up + currently scanned.
+     */
+    final pickedUp = _currentPickedUpCount;
 
     /*
-     * PopScope prevents accidental navigation while
-     * the rider has unsaved temporary scans.
+     * Bottles still needing pickup.
      */
+    final remaining = _remainingBottleCount;
+
+    /*
+     * The rider can complete as soon as at least
+     * one new bottle has been scanned.
+     */
+    final canComplete = _scannedBottles.isNotEmpty && !_isProcessing;
+
+    /*
+     * Complete Pickup means the current scan session
+     * will bring the cumulative pickup count to the
+     * total delivered count.
+     */
+    final allPickedUp = pickedUp >= required;
+
     return PopScope(
       canPop: !_isProcessing && _scannedBottles.isEmpty,
       onPopInvokedWithResult: (didPop, result) async {
@@ -1159,7 +960,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
           child: Column(
             children: [
               /*
-               * Order information and scan progress.
+               * Order information and cumulative
+               * pickup progress.
                */
               Padding(
                 padding: const EdgeInsets.all(AppSizes.screenPadding),
@@ -1184,15 +986,31 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                       children: [
                         Expanded(
                           child: Text(
-                            'Bottles scanned',
+                            'Bottles picked up',
                             style: AppTextStyles.body,
                           ),
                         ),
                         Text(
-                          '$scanned / $required',
+                          '$pickedUp / $required',
                           style: AppTextStyles.dashboardTitle,
                         ),
                       ],
+                    ),
+
+                    const SizedBox(height: AppSpacing.xs),
+
+                    Text(
+                      'Previously picked up: '
+                      '$_alreadyPickedUpCount',
+                      style: AppTextStyles.bodySecondary,
+                    ),
+
+                    const SizedBox(height: AppSpacing.xs),
+
+                    Text(
+                      'Scanning now: '
+                      '${_scannedBottles.length}',
+                      style: AppTextStyles.bodySecondary,
                     ),
 
                     const SizedBox(height: AppSpacing.xs),
@@ -1205,7 +1023,9 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                     const SizedBox(height: AppSpacing.sm),
 
                     LinearProgressIndicator(
-                      value: required == 0 ? 0 : scanned / required,
+                      value: required == 0
+                          ? 0
+                          : (pickedUp / required).clamp(0.0, 1.0),
                     ),
                   ],
                 ),
@@ -1223,9 +1043,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                       onDetect: _handleScan,
                     ),
 
-                    /*
-                     * Scanner guide box.
-                     */
                     Container(
                       width: 250,
                       height: 250,
@@ -1235,9 +1052,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                       ),
                     ),
 
-                    /*
-                     * Processing overlay.
-                     */
                     if (_isProcessing)
                       Container(
                         color: Colors.black45,
@@ -1262,8 +1076,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
               ),
 
               /*
-               * Displays bottles that have been
-               * temporarily scanned.
+               * Temporarily scanned bottles.
                */
               if (_scannedBottles.isNotEmpty)
                 Padding(
@@ -1309,11 +1122,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                 ),
 
               /*
-               * Commits the temporary scans.
-               *
-               * The button changes its label depending
-               * on whether all delivered bottles have
-               * been scanned.
+               * Complete pickup button.
                */
               Padding(
                 padding: const EdgeInsets.fromLTRB(
@@ -1327,7 +1136,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                   child: ElevatedButton(
                     onPressed: canComplete ? _completePickup : null,
                     child: Text(
-                      allScanned
+                      allPickedUp
                           ? 'Complete Pickup'
                           : 'Complete Partial Pickup',
                     ),
@@ -1343,11 +1152,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 }
 
 /*
- * Represents a bottle that has been scanned locally
- * but has NOT yet been committed to the database.
- *
- * The GPS coordinates belong to the moment the
- * bottle was scanned.
+ * Represents a bottle scanned locally but not yet
+ * committed to the database.
  */
 class _PendingPickupBottle {
   final String bottleNumber;

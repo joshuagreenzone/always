@@ -99,7 +99,7 @@ try {
             ON o.BottleTypeID = bt.BottleTypeID
 
         WHERE d.AccID = :deliveryAccId
-        AND d.DeliveryStatus = 'DELIVERED'
+          AND d.DeliveryStatus = 'DELIVERED'
 
 
         UNION ALL
@@ -114,10 +114,10 @@ try {
 
             bt.BottleType,
 
-            o.Quantity,
+            COUNT(dpt.BottleID) AS Quantity,
             o.UnitPrice,
 
-            (o.Quantity * o.UnitPrice) AS TotalAmount,
+            (COUNT(dpt.BottleID) * o.UnitPrice) AS TotalAmount,
 
             COALESCE(
                 (
@@ -181,7 +181,20 @@ try {
         INNER JOIN bottle_types bt
             ON o.BottleTypeID = bt.BottleTypeID
 
+        INNER JOIN delivery_pickup_transaction dpt
+            ON dpt.PickUpID = p.PickUpID
+
         WHERE p.AccID = :pickupAccId
+
+        GROUP BY
+            p.PickUpID,
+            o.OrderID,
+            c.CustomerName,
+            c.CustomerAddress,
+            bt.BottleType,
+            o.Quantity,
+            o.UnitPrice,
+            p.PickUpDateTime
 
         ORDER BY TransactionDateTime DESC
     ";

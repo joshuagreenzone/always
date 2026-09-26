@@ -1,4 +1,3 @@
-
 <?php
 
 header('Content-Type: application/json');
@@ -119,6 +118,11 @@ try {
      * =========================================================
      * VERIFY RIDER + DELIVERY + ORDER
      * =========================================================
+     *
+     * NOTE:
+     *
+     * Bottle type is no longer read from orders.BottleTypeID.
+     * The order may now contain multiple order_items.
      */
 
     $deliverySql = "
@@ -128,20 +132,13 @@ try {
             d.AccID,
             d.DeliveryStatus,
 
-            o.BottleTypeID,
-            o.Quantity,
             o.OrderStatus,
-            o.PaymentStatus,
-
-            bt.BottleType
+            o.PaymentStatus
 
         FROM delivery d
 
         INNER JOIN orders o
             ON d.OrderID = o.OrderID
-
-        INNER JOIN bottle_types bt
-            ON o.BottleTypeID = bt.BottleTypeID
 
         INNER JOIN accounts a
             ON d.AccID = a.AccID
@@ -224,43 +221,6 @@ try {
 
     /*
      * =========================================================
-     * EXACT QUANTITY CHECK
-     * =========================================================
-     */
-
-    $requiredCount =
-        (int) $delivery['Quantity'];
-
-    $submittedCount =
-        count($bottles);
-
-    if (
-        $submittedCount !==
-        $requiredCount
-    ) {
-
-        http_response_code(400);
-
-        echo json_encode([
-            'success' => false,
-
-            'message' =>
-                'The number of scanned bottles does not match the order quantity.',
-
-            'data' => [
-                'required' =>
-                    $requiredCount,
-
-                'submitted' =>
-                    $submittedCount
-            ]
-        ]);
-
-        exit;
-    }
-
-    /*
-     * =========================================================
      * CHECK DUPLICATE BOTTLES IN REQUEST
      * =========================================================
      */
@@ -275,7 +235,6 @@ try {
 
             echo json_encode([
                 'success' => false,
-
                 'message' =>
                     'Invalid bottle data at index ' .
                     $index . '.'
@@ -320,7 +279,6 @@ try {
 
             echo json_encode([
                 'success' => false,
-
                 'message' =>
                     'Duplicate bottle detected: ' .
                     $number
@@ -357,30 +315,17 @@ try {
                 d.AccID,
                 d.DeliveryStatus,
 
-                o.BottleTypeID,
-                o.Quantity,
                 o.OrderStatus,
-                o.PaymentStatus,
-
-                bt.BottleType
+                o.PaymentStatus
 
             FROM delivery d
 
             INNER JOIN orders o
                 ON d.OrderID = o.OrderID
 
-            INNER JOIN bottle_types bt
-                ON o.BottleTypeID =
-                   bt.BottleTypeID
-
-            WHERE d.DeliveryID =
-                  :deliveryId
-
-              AND d.OrderID =
-                  :orderId
-
-              AND d.AccID =
-                  :accId
+            WHERE d.DeliveryID = :deliveryId
+              AND d.OrderID = :orderId
+              AND d.AccID = :accId
 
             FOR UPDATE
         ";
@@ -435,11 +380,168 @@ try {
 
         /*
          * =====================================================
+         * LOAD + LOCK ORDER ITEMS
+         * =====================================================
+         *
+         * This is now the source of truth for:
+         *
+         * - bottle types
+         * - quantities
+         * - order total quantity
+         *
+         * Example:
+         *
+         * Order 10
+         *   Round Gallon  x 2
+         *   Square Gallon x 1
+         *   Wilkins       x 3
+         *
+         * Total required = 6 bottles
+         */
+
+        $orderItemsSql = "
+            SELECT
+                oi.OrderItemID,
+                oi.OrderID,
+                oi.BottleTypeID,
+                oi.Quantity,
+                oi.UnitPrice,
+                bt.BottleType
+
+            FROM order_items oi
+
+            INNER JOIN bottle_types bt
+                ON oi.BottleTypeID =
+                   bt.BottleTypeID
+
+            WHERE oi.OrderID =
+                  :orderId
+
+            ORDER BY
+                oi.OrderItemID ASC
+
+            FOR UPDATE
+        ";
+
+        $orderItemsStmt =
+            $db->prepare(
+                $orderItemsSql
+            );
+
+        $orderItemsStmt->execute([
+            ':orderId' =>
+                $orderId
+        ]);
+
+        $orderItems =
+            $orderItemsStmt->fetchAll();
+
+        if (!$orderItems) {
+
+            throw new Exception(
+                'This order does not contain any order items.'
+            );
+        }
+
+        /*
+         * =====================================================
+         * CALCULATE REQUIRED TOTAL QUANTITY
+         * =====================================================
+         */
+
+        $requiredCount = 0;
+
+        /*
+         * Remaining quantity for each order item.
+         *
+         * Example:
+         *
+         * [
+         *   101 => 2,
+         *   102 => 1,
+         *   103 => 3
+         * ]
+         */
+
+        $remainingItems = [];
+
+        foreach ($orderItems as $orderItem) {
+
+            $orderItemId =
+                (int)
+                $orderItem['OrderItemID'];
+
+            $quantity =
+                (int)
+                $orderItem['Quantity'];
+
+            if ($quantity <= 0) {
+
+                throw new Exception(
+                    'Order item ' .
+                    $orderItemId .
+                    ' has an invalid quantity.'
+                );
+            }
+
+            $requiredCount +=
+                $quantity;
+
+            $remainingItems[
+                $orderItemId
+            ] = [
+                'orderItemId' =>
+                    $orderItemId,
+
+                'bottleTypeId' =>
+                    (int)
+                    $orderItem['BottleTypeID'],
+
+                'bottleType' =>
+                    $orderItem['BottleType'],
+
+                'quantity' =>
+                    $quantity,
+
+                'remaining' =>
+                    $quantity,
+
+                'unitPrice' =>
+                    (float)
+                    $orderItem['UnitPrice']
+            ];
+        }
+
+        /*
+         * =====================================================
+         * EXACT TOTAL QUANTITY CHECK
+         * =====================================================
+         */
+
+        $submittedCount =
+            count($bottles);
+
+        if (
+            $submittedCount !==
+            $requiredCount
+        ) {
+
+            throw new Exception(
+                'The number of scanned bottles does not match the total order quantity. '
+                . 'Required: ' .
+                $requiredCount .
+                ', submitted: ' .
+                $submittedCount .
+                '.'
+            );
+        }
+
+        /*
+         * =====================================================
          * CHECK EXISTING DELIVERY TRANSACTIONS
          * =====================================================
          *
-         * The new Flutter delivery scanner stores scans only
-         * in memory.
+         * The Flutter scanner stores scans only in memory.
          *
          * Therefore there should normally be no ODT records
          * before this endpoint is called.
@@ -487,8 +589,11 @@ try {
 
         /*
          * =====================================================
-         * PREPARE BOTTLE QUERIES
+         * PREPARE BOTTLE QUERY
          * =====================================================
+         *
+         * FOR UPDATE is important because the bottle is being
+         * consumed from the available/refilled bottle pool.
          */
 
         $bottleSql = "
@@ -508,6 +613,8 @@ try {
                   :bottleNumber
 
             LIMIT 1
+
+            FOR UPDATE
         ";
 
         $bottleStmt =
@@ -516,9 +623,9 @@ try {
             );
 
         /*
-         * -----------------------------------------------------
-         * Bottle currently with another customer.
-         * -----------------------------------------------------
+         * =====================================================
+         * BOTTLE CURRENTLY WITH ANOTHER CUSTOMER
+         * =====================================================
          */
 
         $activeBottleSql = "
@@ -573,9 +680,9 @@ try {
             );
 
         /*
-         * -----------------------------------------------------
-         * Bottle assigned to another active delivery.
-         * -----------------------------------------------------
+         * =====================================================
+         * BOTTLE ASSIGNED TO ANOTHER ACTIVE DELIVERY
+         * =====================================================
          */
 
         $activeDeliverySql = "
@@ -608,9 +715,9 @@ try {
             );
 
         /*
-         * -----------------------------------------------------
-         * Latest refill.
-         * -----------------------------------------------------
+         * =====================================================
+         * LATEST REFILL
+         * =====================================================
          */
 
         $refillSql = "
@@ -636,9 +743,9 @@ try {
             );
 
         /*
-         * -----------------------------------------------------
-         * Latest pickup.
-         * -----------------------------------------------------
+         * =====================================================
+         * LATEST PICKUP
+         * =====================================================
          */
 
         $latestPickupSql = "
@@ -668,9 +775,9 @@ try {
             );
 
         /*
-         * -----------------------------------------------------
-         * Existing exact ODT.
-         * -----------------------------------------------------
+         * =====================================================
+         * EXISTING EXACT ODT
+         * =====================================================
          */
 
         $duplicateSql = "
@@ -700,18 +807,25 @@ try {
          * =====================================================
          * PREPARE INSERT ODT
          * =====================================================
+         *
+         * IMPORTANT:
+         *
+         * OrderItemID is now saved so we know exactly which
+         * order item this bottle fulfilled.
          */
 
         $insertOdtSql = "
             INSERT INTO order_delivery_transaction
             (
                 OrderID,
+                OrderItemID,
                 DeliveryID,
                 BottleID
             )
             VALUES
             (
                 :orderId,
+                :orderItemId,
                 :deliveryId,
                 :bottleId
             )
@@ -786,28 +900,31 @@ try {
 
             $latitude =
                 isset($item['latitude']) &&
-                $item['latitude'] !== null
+                $item['latitude'] !== null &&
+                $item['latitude'] !== ''
                     ? (float)
                         $item['latitude']
                     : null;
 
             $longitude =
                 isset($item['longitude']) &&
-                $item['longitude'] !== null
+                $item['longitude'] !== null &&
+                $item['longitude'] !== ''
                     ? (float)
                         $item['longitude']
                     : null;
 
             $accuracy =
                 isset($item['accuracy']) &&
-                $item['accuracy'] !== null
+                $item['accuracy'] !== null &&
+                $item['accuracy'] !== ''
                     ? (float)
                         $item['accuracy']
                     : null;
 
             /*
              * -------------------------------------------------
-             * FIND BOTTLE
+             * FIND + LOCK BOTTLE
              * -------------------------------------------------
              */
 
@@ -831,33 +948,121 @@ try {
                 (int)
                 $bottle['BottleID'];
 
+            $bottleTypeId =
+                (int)
+                $bottle['BottleTypeID'];
+
+            $bottleType =
+                $bottle['BottleType'];
+
             /*
              * -------------------------------------------------
-             * VERIFY BOTTLE TYPE
+             * FIND ORDER ITEM FOR THIS BOTTLE TYPE
              * -------------------------------------------------
+             *
+             * We do NOT require Flutter to send OrderItemID.
+             *
+             * The server knows the bottle type from the scanned
+             * bottle and matches it against the order items.
+             *
+             * Example:
+             *
+             * Order items:
+             *   Round    x 2
+             *   Square   x 1
+             *
+             * Scanned:
+             *   Round
+             *   Square
+             *   Round
+             *
+             * The server automatically assigns:
+             *   Round  -> first Round order item
+             *   Square -> Square order item
+             *   Round  -> remaining Round quantity
              */
 
-            if (
-                (int)
-                    $bottle['BottleTypeID']
-                !==
-                (int)
-                    $lockedDelivery[
-                        'BottleTypeID'
-                    ]
+            $matchedOrderItemId = null;
+
+            foreach (
+                $remainingItems
+                as $orderItemId =>
+                &$remainingItem
             ) {
 
+                if (
+                    $remainingItem[
+                        'bottleTypeId'
+                    ] === $bottleTypeId
+
+                    &&
+
+                    $remainingItem[
+                        'remaining'
+                    ] > 0
+                ) {
+
+                    $matchedOrderItemId =
+                        (int)
+                        $orderItemId;
+
+                    $remainingItem[
+                        'remaining'
+                    ]--;
+
+                    break;
+                }
+            }
+
+            unset($remainingItem);
+
+            if (
+                $matchedOrderItemId === null
+            ) {
+
+                $expectedTypes = [];
+
+                foreach (
+                    $remainingItems
+                    as $remainingItem
+                ) {
+
+                    if (
+                        $remainingItem[
+                            'remaining'
+                        ] > 0
+                    ) {
+
+                        $expectedTypes[] =
+                            $remainingItem[
+                                'bottleType'
+                            ]
+                            .
+                            ' x '
+                            .
+                            $remainingItem[
+                                'remaining'
+                            ];
+                    }
+                }
+
+                $expectedText =
+                    count($expectedTypes) > 0
+                        ? implode(
+                            ', ',
+                            $expectedTypes
+                        )
+                        : 'none';
+
                 throw new Exception(
-                    'Wrong bottle type for bottle ' .
+                    'Bottle ' .
                     $bottleNumber .
-                    '. This order requires ' .
-                    $lockedDelivery[
-                        'BottleType'
-                    ] .
-                    ', but the scanned bottle is ' .
-                    $bottle[
-                        'BottleType'
-                    ] .
+                    ' (' .
+                    $bottleType .
+                    ') cannot be matched to a remaining order item. '
+                    .
+                    'Remaining required types: ' .
+                    $expectedText .
                     '.'
                 );
             }
@@ -1004,6 +1209,9 @@ try {
                 ':orderId' =>
                     $orderId,
 
+                ':orderItemId' =>
+                    $matchedOrderItemId,
+
                 ':deliveryId' =>
                     $deliveryId,
 
@@ -1065,15 +1273,13 @@ try {
                     ],
 
                 'bottleTypeId' =>
-                    (int)
-                    $bottle[
-                        'BottleTypeID'
-                    ],
+                    $bottleTypeId,
 
                 'bottleType' =>
-                    $bottle[
-                        'BottleType'
-                    ],
+                    $bottleType,
+
+                'orderItemId' =>
+                    $matchedOrderItemId,
 
                 'odtId' =>
                     $odtId,
@@ -1081,6 +1287,105 @@ try {
                 'scanEventId' =>
                     $scanEventId
             ];
+        }
+
+        /*
+         * =====================================================
+         * VERIFY EVERY ORDER ITEM WAS FULFILLED
+         * =====================================================
+         *
+         * This is more important than checking only the total
+         * quantity.
+         *
+         * Example:
+         *
+         * Required:
+         *   Round  x 2
+         *   Square x 1
+         *
+         * Submitted:
+         *   Round
+         *   Round
+         *   Round
+         *
+         * Total = 3
+         *
+         * The total quantity check alone would pass.
+         *
+         * The remaining-item check below correctly rejects it
+         * because Square x 1 was never delivered.
+         */
+
+        $unfulfilledItems = [];
+
+        foreach (
+            $remainingItems
+            as $remainingItem
+        ) {
+
+            if (
+                $remainingItem[
+                    'remaining'
+                ] > 0
+            ) {
+
+                $unfulfilledItems[] = [
+                    'orderItemId' =>
+                        $remainingItem[
+                            'orderItemId'
+                        ],
+
+                    'bottleTypeId' =>
+                        $remainingItem[
+                            'bottleTypeId'
+                        ],
+
+                    'bottleType' =>
+                        $remainingItem[
+                            'bottleType'
+                        ],
+
+                    'remaining' =>
+                        $remainingItem[
+                            'remaining'
+                        ]
+                ];
+            }
+        }
+
+        if (
+            count($unfulfilledItems) > 0
+        ) {
+
+            $details = [];
+
+            foreach (
+                $unfulfilledItems
+                as $unfulfilled
+            ) {
+
+                $details[] =
+                    $unfulfilled[
+                        'bottleType'
+                    ]
+                    .
+                    ' x '
+                    .
+                    $unfulfilled[
+                        'remaining'
+                    ];
+            }
+
+            throw new Exception(
+                'Not all order items were fulfilled. '
+                .
+                'Remaining: '
+                .
+                implode(
+                    ', ',
+                    $details
+                )
+            );
         }
 
         /*
@@ -1127,8 +1432,99 @@ try {
         ) {
 
             throw new Exception(
-                'The final bottle count does not match the order quantity.'
+                'The final bottle count does not match the total order quantity.'
             );
+        }
+
+        /*
+         * =====================================================
+         * VERIFY ODT ORDER ITEM ASSIGNMENTS
+         * =====================================================
+         */
+
+        $itemCountSql = "
+            SELECT
+                odt.OrderItemID,
+                COUNT(*) AS ScannedCount
+
+            FROM order_delivery_transaction odt
+
+            WHERE odt.OrderID =
+                  :orderId
+
+              AND odt.DeliveryID =
+                  :deliveryId
+
+            GROUP BY
+                odt.OrderItemID
+        ";
+
+        $itemCountStmt =
+            $db->prepare(
+                $itemCountSql
+            );
+
+        $itemCountStmt->execute([
+            ':orderId' =>
+                $orderId,
+
+            ':deliveryId' =>
+                $deliveryId
+        ]);
+
+        $itemCounts =
+            $itemCountStmt->fetchAll();
+
+        foreach ($itemCounts as $itemCount) {
+
+            $itemId =
+                (int)
+                $itemCount[
+                    'OrderItemID'
+                ];
+
+            $scanned =
+                (int)
+                $itemCount[
+                    'ScannedCount'
+                ];
+
+            if (
+                !isset(
+                    $remainingItems[
+                        $itemId
+                    ]
+                )
+            ) {
+
+                throw new Exception(
+                    'A delivery transaction references an invalid order item.'
+                );
+            }
+
+            $expected =
+                (int)
+                $remainingItems[
+                    $itemId
+                ][
+                    'quantity'
+                ];
+
+            if (
+                $scanned !==
+                $expected
+            ) {
+
+                throw new Exception(
+                    'Order item ' .
+                    $itemId .
+                    ' expected ' .
+                    $expected .
+                    ' bottle(s), but ' .
+                    $scanned .
+                    ' were scanned.'
+                );
+            }
         }
 
         /*
@@ -1264,9 +1660,6 @@ try {
          * IMPORTANT:
          *
          * Do NOT use rowCount() here.
-         *
-         * MySQL can return 0 when the value is already
-         * DELIVERED. What matters is the final database value.
          */
 
         $verifyOrderSql = "
@@ -1318,15 +1711,6 @@ try {
          * =====================================================
          * COMMIT
          * =====================================================
-         *
-         * At this point:
-         *
-         * - ODT records exist
-         * - DELIVERY_SCAN events exist
-         * - delivery is DELIVERED
-         * - order is DELIVERED
-         *
-         * Everything is committed together.
          */
 
         $db->commit();
@@ -1383,8 +1767,8 @@ try {
          * =====================================================
          *
          * If anything fails after beginTransaction(),
-         * all bottle transactions and scan events created
-         * during this request are removed.
+         * all ODT records and scan events created during this
+         * request are rolled back.
          */
 
         if (
@@ -1431,4 +1815,4 @@ try {
 
     exit;
 }
-
+?>

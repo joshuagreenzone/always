@@ -1,3 +1,4 @@
+
 <?php
 
 header('Content-Type: application/json');
@@ -12,8 +13,13 @@ try {
     $db = $database->connect();
 
     /*
+     * =========================================================
+     * READ REQUEST
+     * =========================================================
+     *
      * Multipart/form-data
      */
+
     $accId = isset($_POST['accId'])
         ? (int) $_POST['accId']
         : 0;
@@ -35,8 +41,11 @@ try {
         : '';
 
     /*
-     * Basic validation
+     * =========================================================
+     * BASIC VALIDATION
+     * =========================================================
      */
+
     if ($accId <= 0 || $orderId <= 0) {
 
         http_response_code(400);
@@ -62,10 +71,18 @@ try {
     }
 
     /*
-     * Round to 2 decimal places because payment values
-     * are monetary amounts.
+     * =========================================================
+     * NORMALIZE PAYMENT AMOUNT
+     * =========================================================
      */
+
     $paymentAmount = round($paymentAmount, 2);
+
+    /*
+     * =========================================================
+     * VALID PAYMENT TYPES
+     * =========================================================
+     */
 
     $allowedPaymentTypes = [
         'CASH',
@@ -86,8 +103,11 @@ try {
     }
 
     /*
-     * Validate receiving account.
+     * =========================================================
+     * VALIDATE RECEIVING ACCOUNT
+     * =========================================================
      */
+
     $accountSql = "
         SELECT
             AccID,
@@ -119,8 +139,11 @@ try {
     }
 
     /*
-     * Only ADMIN and RIDER accounts may receive payments.
+     * =========================================================
+     * ONLY ADMIN AND RIDER MAY RECEIVE PAYMENTS
+     * =========================================================
      */
+
     if (
         $account['AccType'] !== 'ADMIN' &&
         $account['AccType'] !== 'RIDER'
@@ -138,14 +161,17 @@ try {
     }
 
     /*
-     * Receipt image.
+     * =========================================================
+     * RECEIPT IMAGE
+     * =========================================================
      *
      * CASH:
-     *     receipt image is optional.
+     *     receipt image optional.
      *
      * GCASH / BANK_TRANSFER:
-     *     receipt image is required.
+     *     receipt image required.
      */
+
     $receiptImage = null;
 
     if ($paymentType !== 'CASH') {
@@ -227,26 +253,38 @@ try {
     }
 
     /*
-     * Begin transaction BEFORE checking the outstanding
-     * balance.
+     * =========================================================
+     * BEGIN TRANSACTION
+     * =========================================================
      *
-     * The order row will be locked with FOR UPDATE so
-     * simultaneous payment requests cannot both spend
-     * the same outstanding balance.
+     * The order row is locked so simultaneous payment requests
+     * cannot spend the same outstanding balance.
      */
+
     $db->beginTransaction();
 
     /*
-     * Lock and retrieve the order.
+     * =========================================================
+     * LOCK AND RETRIEVE ORDER
+     * =========================================================
+     *
+     * IMPORTANT:
+     *
+     * The old implementation calculated:
+     *
+     *     orders.Quantity * orders.UnitPrice
+     *
+     * That only works for single-item orders.
+     *
+     * The current system supports multiple bottle types per order,
+     * so order_items is now the source of truth for the order total.
      */
+
     $orderSql = "
         SELECT
             o.OrderID,
             o.CustomerID,
-            o.Quantity,
-            o.UnitPrice,
-            o.PaymentStatus,
-            (o.Quantity * o.UnitPrice) AS TotalAmount
+            o.PaymentStatus
         FROM orders o
         WHERE o.OrderID = :orderId
         LIMIT 1
@@ -276,10 +314,76 @@ try {
     }
 
     /*
-     * Rider authorization.
+     * =========================================================
+     * GET ORDER TOTAL FROM ORDER ITEMS
+     * =========================================================
+     *
+     * Example:
+     *
+     * 2 × Round Gallon  @ ₱50 = ₱100
+     * 1 × Wilkins Gallon @ ₱60 = ₱60
+     *
+     * Total = ₱160
+     */
+
+    $totalSql = "
+        SELECT
+            COALESCE(
+                SUM(
+                    oi.Quantity * oi.UnitPrice
+                ),
+                0
+            ) AS TotalAmount
+        FROM order_items oi
+        WHERE oi.OrderID = :orderId
+    ";
+
+    $totalStmt = $db->prepare($totalSql);
+
+    $totalStmt->execute([
+        ':orderId' => $orderId
+    ]);
+
+    $totalResult = $totalStmt->fetch(PDO::FETCH_ASSOC);
+
+    $totalAmount = round(
+        (float) ($totalResult['TotalAmount'] ?? 0),
+        2
+    );
+
+    /*
+     * =========================================================
+     * VERIFY ORDER HAS ITEMS
+     * =========================================================
+     */
+
+    if ($totalAmount <= 0) {
+
+        $db->rollBack();
+
+        http_response_code(400);
+
+        echo json_encode([
+            'success' => false,
+            'message' =>
+                'This order has no valid order items or has a zero total amount.',
+            'data' => [
+                'orderId' => $orderId,
+                'totalAmount' => $totalAmount
+            ]
+        ]);
+
+        exit;
+    }
+
+    /*
+     * =========================================================
+     * RIDER AUTHORIZATION
+     * =========================================================
      *
      * A rider must have a delivery assignment for this order.
      */
+
     if ($account['AccType'] === 'RIDER') {
 
         $deliverySql = "
@@ -318,15 +422,25 @@ try {
     }
 
     /*
-     * Calculate all previous payments while the order
-     * remains locked.
+     * =========================================================
+     * CALCULATE PREVIOUS PAYMENTS
+     * =========================================================
+     *
+     * Only payments linked through order_payment_transaction
+     * are counted toward this order.
      */
+
     $paidSql = "
         SELECT
-            COALESCE(SUM(opt.Amount), 0) AS PaidAmount
+            COALESCE(
+                SUM(opt.Amount),
+                0
+            ) AS PaidAmount
         FROM order_payment_transaction opt
+
         INNER JOIN payments p
             ON opt.PaymentID = p.PaymentID
+
         WHERE opt.OrderID = :orderId
     ";
 
@@ -338,15 +452,16 @@ try {
 
     $paid = $paidStmt->fetch(PDO::FETCH_ASSOC);
 
-    $totalAmount = round(
-        (float) $order['TotalAmount'],
+    $alreadyPaid = round(
+        (float) ($paid['PaidAmount'] ?? 0),
         2
     );
 
-    $alreadyPaid = round(
-        (float) $paid['PaidAmount'],
-        2
-    );
+    /*
+     * =========================================================
+     * CALCULATE OUTSTANDING BALANCE
+     * =========================================================
+     */
 
     $outstanding = round(
         $totalAmount - $alreadyPaid,
@@ -354,8 +469,11 @@ try {
     );
 
     /*
-     * Prevent payments on an already fully paid order.
+     * =========================================================
+     * PREVENT OVERPAID ORDER
+     * =========================================================
      */
+
     if ($outstanding <= 0) {
 
         $db->rollBack();
@@ -377,10 +495,11 @@ try {
     }
 
     /*
-     * IMPORTANT:
-     * Never allow payment to exceed the actual
-     * outstanding balance.
+     * =========================================================
+     * PREVENT PAYMENT FROM EXCEEDING BALANCE
+     * =========================================================
      */
+
     if ($paymentAmount > $outstanding) {
 
         $db->rollBack();
@@ -406,8 +525,11 @@ try {
     }
 
     /*
-     * Create payment.
+     * =========================================================
+     * CREATE PAYMENT
+     * =========================================================
      */
+
     $paymentSql = "
         INSERT INTO payments
         (
@@ -493,8 +615,11 @@ try {
     $paymentId = (int) $db->lastInsertId();
 
     /*
-     * Link payment to order.
+     * =========================================================
+     * LINK PAYMENT TO ORDER
+     * =========================================================
      */
+
     $transactionSql = "
         INSERT INTO order_payment_transaction
         (
@@ -510,7 +635,9 @@ try {
         )
     ";
 
-    $transactionStmt = $db->prepare($transactionSql);
+    $transactionStmt = $db->prepare(
+        $transactionSql
+    );
 
     $transactionStmt->execute([
         ':orderId' => $orderId,
@@ -519,8 +646,11 @@ try {
     ]);
 
     /*
-     * Calculate new totals.
+     * =========================================================
+     * CALCULATE NEW PAYMENT TOTAL
+     * =========================================================
      */
+
     $newPaidAmount = round(
         $alreadyPaid + $paymentAmount,
         2
@@ -532,11 +662,15 @@ try {
     );
 
     /*
-     * Avoid tiny decimal precision issues.
+     * =========================================================
+     * DETERMINE NEW PAYMENT STATUS
+     * =========================================================
      */
+
     if ($newOutstanding <= 0.01) {
 
         $newOutstanding = 0;
+
         $paymentStatus = 'PAID';
 
     } else {
@@ -545,8 +679,11 @@ try {
     }
 
     /*
-     * Update order payment status.
+     * =========================================================
+     * UPDATE ORDER PAYMENT STATUS
+     * =========================================================
      */
+
     $updateOrderSql = "
         UPDATE orders
         SET PaymentStatus = :paymentStatus
@@ -563,9 +700,18 @@ try {
     ]);
 
     /*
-     * Commit everything.
+     * =========================================================
+     * COMMIT
+     * =========================================================
      */
+
     $db->commit();
+
+    /*
+     * =========================================================
+     * SUCCESS RESPONSE
+     * =========================================================
+     */
 
     echo json_encode([
         'success' => true,
@@ -573,11 +719,17 @@ try {
         'data' => [
             'paymentId' => $paymentId,
             'orderId' => $orderId,
+
             'totalAmount' => $totalAmount,
+
             'paidAmount' => $newPaidAmount,
+
             'outstandingAmount' => $newOutstanding,
+
             'paymentStatus' => $paymentStatus,
+
             'receivedByAccId' => $accId,
+
             'receivedByType' => $account['AccType']
         ]
     ]);
@@ -615,3 +767,4 @@ try {
     ]);
 }
 ?>
+

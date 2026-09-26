@@ -152,9 +152,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               color: AppColors.primary,
               size: 52,
             ),
-
             const SizedBox(width: AppSpacing.md),
-
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -168,7 +166,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 ],
               ),
             ),
-
             StatusChip(
               label: order.paymentStatus,
               color: paymentStatusColor(order.paymentStatus),
@@ -187,9 +184,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Customer', style: AppTextStyles.title),
-
             const SizedBox(height: AppSpacing.md),
-
             Row(
               children: [
                 const IconBadge(
@@ -197,9 +192,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   color: AppColors.info,
                   size: 36,
                 ),
-
                 const SizedBox(width: AppSpacing.sm),
-
                 Expanded(
                   child: Text(order.customerName, style: AppTextStyles.body),
                 ),
@@ -219,19 +212,20 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Order Information', style: AppTextStyles.title),
+            const SizedBox(height: AppSpacing.md),
 
-            const SizedBox(height: AppSpacing.sm),
-
-            InfoRow(label: 'Bottle Type', value: order.bottleType),
-
-            InfoRow(label: 'Quantity', value: '${order.quantity}'),
-
-            InfoRow(
-              label: 'Unit Price',
-              value: '₱${order.unitPrice.toStringAsFixed(2)}',
-            ),
+            if (order.items.isEmpty)
+              Text('No order items found.', style: AppTextStyles.bodySecondary)
+            else
+              ...order.items.map((item) => _buildOrderItem(item)),
 
             const Divider(height: AppSpacing.lg),
+
+            InfoRow(
+              label: 'Total Bottles',
+              value: '${order.totalQuantity}',
+              bold: true,
+            ),
 
             InfoRow(
               label: 'Total Amount',
@@ -242,6 +236,50 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             InfoRow(label: 'Payment', value: order.paymentStatus),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildOrderItem(OrderItemDetails item) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppSizes.cardRadius),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.water_drop_outlined, color: AppColors.accent),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  item.bottleType,
+                  style: AppTextStyles.body.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Text('× ${item.quantity}', style: AppTextStyles.body),
+            ],
+          ),
+
+          const SizedBox(height: AppSpacing.xs),
+
+          InfoRow(
+            label: 'Unit Price',
+            value: '₱${item.unitPrice.toStringAsFixed(2)}',
+          ),
+
+          InfoRow(
+            label: 'Subtotal',
+            value: '₱${item.totalAmount.toStringAsFixed(2)}',
+            bold: true,
+          ),
+        ],
       ),
     );
   }
@@ -270,9 +308,21 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             const SizedBox(height: AppSpacing.md),
 
             Text(
-              '${order.quantity} ${order.bottleType} bottle'
-              '${order.quantity == 1 ? '' : 's'} required',
+              '${order.totalQuantity} bottle'
+              '${order.totalQuantity == 1 ? '' : 's'} required',
               style: AppTextStyles.body,
+            ),
+
+            const SizedBox(height: AppSpacing.sm),
+
+            ...order.items.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                child: Text(
+                  '${item.quantity} × ${item.bottleType}',
+                  style: AppTextStyles.bodySecondary,
+                ),
+              ),
             ),
 
             const SizedBox(height: AppSpacing.xs),
@@ -297,9 +347,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     Icons.qr_code_scanner,
                     color: AppColors.textSecondary,
                   ),
-
                   const SizedBox(width: AppSpacing.sm),
-
                   Expanded(
                     child: Text(
                       'No bottles scanned yet.',

@@ -339,6 +339,10 @@ try {
 
     /*
      * Lock the delivery/order relationship.
+     *
+     * Quantity and UnitPrice are intentionally retained
+     * here for compatibility, but they are NO LONGER used
+     * to calculate the total order amount.
      */
     $deliverySql = "
         SELECT
@@ -500,7 +504,6 @@ try {
     /*
      * Prepared statements for bottle processing.
      */
-
     $bottleSql = "
         SELECT
             b.BottleID,
@@ -763,18 +766,77 @@ try {
         (int) $pickedUpCountRow['PickedUpCount'];
 
     /*
-     * Calculate payment information while the order
-     * remains locked by this transaction.
+     * ============================================================
+     * PAYMENT CALCULATION
+     * ============================================================
+     *
+     * IMPORTANT:
+     *
+     * The old system calculated:
+     *
+     *     orders.Quantity * orders.UnitPrice
+     *
+     * That only works for the old single-bottle-type order model.
+     *
+     * The current system supports multiple order_items:
+     *
+     *     Round Gallon × 2 @ 50 = 100
+     *     Wilkins Gallon × 1 @ 60 = 60
+     *
+     *     Total = 160
+     *
+     * Therefore the authoritative order total comes from:
+     *
+     *     SUM(order_items.Quantity * order_items.UnitPrice)
+     *
+     * ============================================================
      */
+
+    $totalSql = "
+        SELECT
+            COALESCE(
+                SUM(oi.Quantity * oi.UnitPrice),
+                0
+            ) AS TotalAmount
+        FROM order_items oi
+        WHERE oi.OrderID = :orderId
+    ";
+
+    $totalStmt = $db->prepare($totalSql);
+
+    $totalStmt->execute([
+        ':orderId' => $orderId
+    ]);
+
+    $totalRow =
+        $totalStmt->fetch(PDO::FETCH_ASSOC);
+
     $totalAmount = round(
-        (float) $delivery['Quantity'] *
-        (float) $delivery['UnitPrice'],
+        (float) ($totalRow['TotalAmount'] ?? 0),
         2
     );
 
+    /*
+     * An order without valid order_items cannot have
+     * a meaningful payment balance.
+     */
+    if ($totalAmount <= 0) {
+
+        throw new RuntimeException(
+            'This order has no valid order items or has a zero total amount.'
+        );
+    }
+
+    /*
+     * Calculate all payments already allocated to
+     * this order.
+     */
     $paidSql = "
         SELECT
-            COALESCE(SUM(opt.Amount), 0) AS PaidAmount
+            COALESCE(
+                SUM(opt.Amount),
+                0
+            ) AS PaidAmount
         FROM order_payment_transaction opt
         INNER JOIN payments p
             ON opt.PaymentID = p.PaymentID
@@ -791,18 +853,25 @@ try {
         $paidStmt->fetch(PDO::FETCH_ASSOC);
 
     $paidAmount = round(
-        (float) $paidRow['PaidAmount'],
+        (float) ($paidRow['PaidAmount'] ?? 0),
         2
     );
 
+    /*
+     * Calculate the remaining customer balance.
+     */
     $outstandingAmount = round(
         $totalAmount - $paidAmount,
         2
     );
 
+    /*
+     * Protect against tiny floating-point differences.
+     */
     if ($outstandingAmount <= 0.01) {
 
         $outstandingAmount = 0;
+
         $paymentStatus = 'PAID';
 
     } elseif ($paidAmount > 0) {
@@ -836,19 +905,36 @@ try {
             'pickUpId' => $pickUpId,
             'orderId' => $orderId,
             'deliveryId' => $deliveryId,
-            'scannedCount' => count($confirmedBottles),
-            'pickedUpCount' => $pickedUpCount,
-            'deliveredCount' => $deliveredCount,
+
+            'scannedCount' =>
+                count($confirmedBottles),
+
+            'pickedUpCount' =>
+                $pickedUpCount,
+
+            'deliveredCount' =>
+                $deliveredCount,
+
             'remainingCount' =>
                 $deliveredCount - $pickedUpCount,
 
-            'paymentStatus' => $paymentStatus,
-            'totalAmount' => $totalAmount,
-            'paidAmount' => $paidAmount,
+            /*
+             * Payment information.
+             */
+            'paymentStatus' =>
+                $paymentStatus,
+
+            'totalAmount' =>
+                $totalAmount,
+
+            'paidAmount' =>
+                $paidAmount,
+
             'outstandingAmount' =>
                 $outstandingAmount,
 
-            'bottles' => $confirmedBottles
+            'bottles' =>
+                $confirmedBottles
         ]
     ]);
 

@@ -104,6 +104,7 @@ class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
           const SizedBox(height: 160),
+
           Center(
             child: IconBadge(
               icon: Icons.local_shipping_outlined,
@@ -111,11 +112,15 @@ class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
               size: AppSizes.largeIconSize,
             ),
           ),
+
           const SizedBox(height: AppSpacing.md),
+
           Center(
             child: Text('No assigned orders.', style: AppTextStyles.title),
           ),
+
           const SizedBox(height: AppSpacing.sm),
+
           Center(
             child: Text(
               'Assigned deliveries will appear here.',
@@ -223,16 +228,41 @@ class _OrderCard extends StatelessWidget {
               value: order.customerName,
             ),
 
-            InfoRow(
-              icon: Icons.water_drop_outlined,
-              label: 'Bottle Type',
-              value: order.bottleType,
+            const SizedBox(height: AppSpacing.xs),
+
+            Text('Bottle Types', style: AppTextStyles.bodySecondary),
+
+            const SizedBox(height: AppSpacing.xs),
+
+            ...order.items.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.water_drop_outlined,
+                      size: 18,
+                      color: AppColors.accent,
+                    ),
+
+                    const SizedBox(width: AppSpacing.sm),
+
+                    Expanded(
+                      child: Text(item.bottleType, style: AppTextStyles.body),
+                    ),
+
+                    Text('× ${item.quantity}', style: AppTextStyles.body),
+                  ],
+                ),
+              ),
             ),
+
+            const SizedBox(height: AppSpacing.xs),
 
             InfoRow(
               icon: Icons.inventory_2_outlined,
-              label: 'Quantity',
-              value: '${order.quantity}',
+              label: 'Total Bottles',
+              value: '${order.totalQuantity}',
             ),
 
             InfoRow(
