@@ -1,32 +1,32 @@
+
 <?php
 
 header("Content-Type: application/json");
 
 require_once "../../config/database.php";
 
+function respond(int $status, array $payload): void
+{
+    http_response_code($status);
+    echo json_encode($payload);
+    exit;
+}
+
 try {
+    $bottleNumber = trim($_GET["bottleNumber"] ?? "");
 
-    $bottleNumber = trim($_GET['bottleNumber'] ?? '');
-
-    if ($bottleNumber === '') {
-        http_response_code(400);
-
-        echo json_encode([
+    if ($bottleNumber === "") {
+        respond(400, [
             "success" => false,
             "message" => "Bottle number is required."
         ]);
-
-        exit;
     }
 
     $database = new Database();
     $db = $database->connect();
 
-    // ============================================================
-    // FIND BOTTLE
-    // ============================================================
-
-    $bottleSql = "
+    // Find registered bottle.
+    $stmt = $db->prepare("
         SELECT
             b.BottleID,
             b.BottleNumber,
@@ -36,272 +36,213 @@ try {
             bt.Price
         FROM bottles b
         INNER JOIN bottle_types bt
-            ON b.BottleTypeID = bt.BottleTypeID
+            ON bt.BottleTypeID = b.BottleTypeID
         WHERE b.BottleNumber = :bottleNumber
         LIMIT 1
-    ";
+    ");
 
-    $bottleStmt = $db->prepare($bottleSql);
-
-    $bottleStmt->execute([
-        ':bottleNumber' => $bottleNumber
+    $stmt->execute([
+        ":bottleNumber" => $bottleNumber
     ]);
 
-    $bottle = $bottleStmt->fetch();
+    $bottle = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$bottle) {
-        http_response_code(404);
-
-        echo json_encode([
+        respond(404, [
             "success" => false,
             "message" => "Invalid bottle. This bottle is not registered."
         ]);
-
-        exit;
     }
 
-    $bottleId = (int) $bottle['BottleID'];
+    $bottleId = (int)$bottle["BottleID"];
 
-    // ============================================================
-    // FIND LATEST DELIVERY FOR THIS BOTTLE
-    // ============================================================
-
-    $deliverySql = "
-        SELECT
-            odt.ODTID,
-            odt.OrderID,
-            odt.DeliveryID,
-            d.DeliveryStatus,
-            d.DeliveryDateTime
-        FROM order_delivery_transaction odt
-
-        INNER JOIN delivery d
-            ON odt.DeliveryID = d.DeliveryID
-
-        WHERE odt.BottleID = :bottleId
-
-        ORDER BY
-            d.DeliveryDateTime DESC,
-            odt.ODTID DESC
-
-        LIMIT 1
-    ";
-
-    $deliveryStmt = $db->prepare($deliverySql);
-
-    $deliveryStmt->execute([
-        ':bottleId' => $bottleId
-    ]);
-
-    $latestDelivery = $deliveryStmt->fetch();
-
-    // ============================================================
-    // FIND LATEST PICKUP FOR THIS BOTTLE
-    // ============================================================
-
-    $pickupSql = "
-        SELECT
-            dpt.DPTID,
-            dpt.PickUpID,
-            p.PickUpDateTime,
-            p.DeliveryID
-        FROM delivery_pickup_transaction dpt
-
-        INNER JOIN pickup p
-            ON dpt.PickUpID = p.PickUpID
-
-        WHERE dpt.BottleID = :bottleId
-
-        ORDER BY
-            p.PickUpDateTime DESC,
-            dpt.DPTID DESC
-
-        LIMIT 1
-    ";
-
-    $pickupStmt = $db->prepare($pickupSql);
-
-    $pickupStmt->execute([
-        ':bottleId' => $bottleId
-    ]);
-
-    $latestPickup = $pickupStmt->fetch();
-
-    // ============================================================
-    // CHECK CURRENT DELIVERY STATUS
-    // ============================================================
-
-    if ($latestDelivery) {
-
-        $deliveryStatus = $latestDelivery['DeliveryStatus'];
-
-        // --------------------------------------------------------
-        // BOTTLE IS CURRENTLY OUT WITH RIDER
-        // --------------------------------------------------------
-
-        if (
-            $deliveryStatus === 'ASSIGNED' ||
-            $deliveryStatus === 'OUT_FOR_DELIVERY'
-        ) {
-
-            $hasBeenPickedUpAfterDelivery = false;
-
-            if ($latestPickup) {
-                $hasBeenPickedUpAfterDelivery =
-                    strtotime($latestPickup['PickUpDateTime']) >
-                    strtotime($latestDelivery['DeliveryDateTime']);
-            }
-
-            if (!$hasBeenPickedUpAfterDelivery) {
-
-                http_response_code(409);
-
-                echo json_encode([
-                    "success" => false,
-                    "message" =>
-                        "Invalid bottle. This bottle is still out for delivery and cannot be refilled.",
-                    "data" => [
-                        "BottleID" => $bottleId,
-                        "BottleNumber" => $bottle['BottleNumber'],
-                        "DeliveryStatus" => $deliveryStatus
-                    ]
-                ]);
-
-                exit;
-            }
-        }
-
-        // --------------------------------------------------------
-        // BOTTLE WAS DELIVERED BUT NOT PICKED UP
-        // --------------------------------------------------------
-
-        if ($deliveryStatus === 'DELIVERED') {
-
-            $hasBeenPickedUpAfterDelivery = false;
-
-            if ($latestPickup) {
-                $hasBeenPickedUpAfterDelivery =
-                    strtotime($latestPickup['PickUpDateTime']) >
-                    strtotime($latestDelivery['DeliveryDateTime']);
-            }
-
-            if (!$hasBeenPickedUpAfterDelivery) {
-
-                http_response_code(409);
-
-                echo json_encode([
-                    "success" => false,
-                    "message" =>
-                        "Invalid bottle. This bottle is still out and has already been delivered. It must be picked up before it can be refilled.",
-                    "data" => [
-                        "BottleID" => $bottleId,
-                        "BottleNumber" => $bottle['BottleNumber'],
-                        "DeliveryStatus" => $deliveryStatus,
-                        "DeliveryID" => $latestDelivery['DeliveryID'],
-                        "OrderID" => $latestDelivery['OrderID']
-                    ]
-                ]);
-
-                exit;
-            }
-        }
-    }
-
-    // ============================================================
-    // FIND LATEST REFILL
-    // ============================================================
-
-    $refillSql = "
-        SELECT
-            RefillID,
-            RefillDateTime
+    // Get the latest refill.
+    $stmt = $db->prepare("
+        SELECT RefillID, RefillDateTime
         FROM refill
-
         WHERE BottleID = :bottleId
-
-        ORDER BY
-            RefillDateTime DESC,
-            RefillID DESC
-
+        ORDER BY RefillDateTime DESC, RefillID DESC
         LIMIT 1
-    ";
+    ");
 
-    $refillStmt = $db->prepare($refillSql);
-
-    $refillStmt->execute([
-        ':bottleId' => $bottleId
+    $stmt->execute([
+        ":bottleId" => $bottleId
     ]);
 
-    $latestRefill = $refillStmt->fetch();
+    $latestRefill = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    // ============================================================
-    // CHECK IF ALREADY REFILLED AFTER LATEST PICKUP
-    // ============================================================
+    // Get the latest premise movement.
+    $stmt = $db->prepare("
+        SELECT MovementID, MovementType, MovementDateTime
+        FROM premise_bottle_movement
+        WHERE BottleID = :bottleId
+        ORDER BY MovementDateTime DESC, MovementID DESC
+        LIMIT 1
+    ");
 
-    if ($latestRefill && $latestPickup) {
+    $stmt->execute([
+        ":bottleId" => $bottleId
+    ]);
 
-        if (
-            strtotime($latestRefill['RefillDateTime']) >=
-            strtotime($latestPickup['PickUpDateTime'])
-        ) {
+    $latestMovement = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            http_response_code(409);
+    // Get the latest bottle scan event.
+    $stmt = $db->prepare("
+        SELECT EventType, ScanDateTime
+        FROM bottle_scan_event
+        WHERE BottleID = :bottleId
+        ORDER BY ScanDateTime DESC
+        LIMIT 1
+    ");
 
-            echo json_encode([
-                "success" => false,
-                "message" =>
-                    "Invalid bottle. This bottle has already been refilled after its latest pickup and is ready for delivery.",
-                "data" => [
-                    "BottleID" => $bottleId,
-                    "BottleNumber" => $bottle['BottleNumber'],
-                    "RefillID" => $latestRefill['RefillID']
-                ]
-            ]);
+    $stmt->execute([
+        ":bottleId" => $bottleId
+    ]);
 
-            exit;
-        }
-    }
+    $latestScanEvent = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    // ============================================================
-    // NO PICKUP
-    // ============================================================
+    /*
+     * Eligibility rule:
+     * 1. Latest premise movement is RETURN; OR
+     * 2. Latest bottle scan event is PICKUP_SCAN.
+     */
+    $allowedByMovement =
+        $latestMovement &&
+        strtoupper(trim($latestMovement["MovementType"])) === "RETURN";
 
-    if (!$latestPickup) {
+    $allowedByPickupScan =
+        $latestScanEvent &&
+        strtoupper(trim($latestScanEvent["EventType"])) === "PICKUP_SCAN";
 
-        http_response_code(409);
+    /*
+     * No movement history and no pickup scan:
+     * Allow a first refill only for a genuinely new bottle.
+     */
+    if (!$latestMovement && !$allowedByPickupScan) {
+        $stmt = $db->prepare("
+            SELECT COUNT(*)
+            FROM order_delivery_transaction
+            WHERE BottleID = :bottleId
+        ");
 
-        echo json_encode([
-            "success" => false,
-            "message" =>
-                "Invalid bottle. This bottle has not been picked up yet and cannot be refilled."
+        $stmt->execute([
+            ":bottleId" => $bottleId
         ]);
 
-        exit;
+        $deliveryCount = (int)$stmt->fetchColumn();
+
+        if ($latestRefill || $deliveryCount > 0) {
+            respond(409, [
+                "success" => false,
+                "message" =>
+                    "This bottle has previous activity but no premise movement history or valid pickup scan. Please verify its records."
+            ]);
+        }
+
+        respond(200, [
+            "success" => true,
+            "message" => "New bottle is eligible for its first refill.",
+            "data" => [
+                "BottleID" => $bottleId,
+                "BottleNumber" => $bottle["BottleNumber"],
+                "BottleTypeID" => (int)$bottle["BottleTypeID"],
+                "BottleType" => $bottle["BottleType"],
+                "Price" => (float)$bottle["Price"],
+                "BottleRegDateTime" => $bottle["BottleRegDateTime"]
+            ]
+        ]);
     }
 
-    // ============================================================
-    // BOTTLE IS ELIGIBLE
-    // ============================================================
+    /*
+     * A bottle with history must satisfy at least one of the two
+     * eligibility conditions.
+     */
+    if (!$allowedByMovement && !$allowedByPickupScan) {
+        respond(409, [
+            "success" => false,
+            "message" =>
+                "Bottle is not eligible for refill. Its latest premise movement is not RETURN and its latest scan event is not PICKUP_SCAN.",
+            "data" => [
+                "BottleID" => $bottleId,
+                "BottleNumber" => $bottle["BottleNumber"],
+                "MovementType" => $latestMovement["MovementType"] ?? null,
+                "EventType" => $latestScanEvent["EventType"] ?? null
+            ]
+        ]);
+    }
 
-    echo json_encode([
+    /*
+     * Prevent duplicate refills during the same RETURN cycle.
+     */
+    if (
+        $allowedByMovement &&
+        $latestRefill &&
+        strtotime($latestRefill["RefillDateTime"]) >=
+        strtotime($latestMovement["MovementDateTime"])
+    ) {
+        respond(409, [
+            "success" => false,
+            "message" =>
+                "This bottle has already been refilled after its latest return.",
+            "data" => [
+                "BottleID" => $bottleId,
+                "BottleNumber" => $bottle["BottleNumber"],
+                "RefillID" => $latestRefill["RefillID"],
+                "RefillDateTime" => $latestRefill["RefillDateTime"]
+            ]
+        ]);
+    }
+
+    /*
+     * If eligibility comes from PICKUP_SCAN rather than RETURN,
+     * prevent another refill after that pickup scan.
+     */
+    if (
+        !$allowedByMovement &&
+        $allowedByPickupScan &&
+        $latestRefill &&
+        strtotime($latestRefill["RefillDateTime"]) >=
+        strtotime($latestScanEvent["ScanDateTime"])
+    ) {
+        respond(409, [
+            "success" => false,
+            "message" =>
+                "This bottle has already been refilled after its latest pickup scan.",
+            "data" => [
+                "BottleID" => $bottleId,
+                "BottleNumber" => $bottle["BottleNumber"],
+                "RefillID" => $latestRefill["RefillID"],
+                "RefillDateTime" => $latestRefill["RefillDateTime"]
+            ]
+        ]);
+    }
+
+    respond(200, [
         "success" => true,
         "message" => "Bottle is eligible for refill.",
         "data" => [
-            "BottleID" => (int) $bottle['BottleID'],
-            "BottleNumber" => $bottle['BottleNumber'],
-            "BottleTypeID" => (int) $bottle['BottleTypeID'],
-            "BottleType" => $bottle['BottleType'],
-            "Price" => (float) $bottle['Price'],
-            "BottleRegDateTime" => $bottle['BottleRegDateTime']
+            "BottleID" => $bottleId,
+            "BottleNumber" => $bottle["BottleNumber"],
+            "BottleTypeID" => (int)$bottle["BottleTypeID"],
+            "BottleType" => $bottle["BottleType"],
+            "Price" => (float)$bottle["Price"],
+            "BottleRegDateTime" => $bottle["BottleRegDateTime"]
         ]
     ]);
 
 } catch (PDOException $e) {
+    error_log("Refill bottle verification database error: " . $e->getMessage());
 
-    http_response_code(500);
-
-    echo json_encode([
+    respond(500, [
         "success" => false,
-        "message" => "Database error."
+        "message" => "Database error while verifying bottle."
+    ]);
+
+} catch (Throwable $e) {
+    error_log("Refill bottle verification error: " . $e->getMessage());
+
+    respond(500, [
+        "success" => false,
+        "message" => "Unable to verify bottle."
     ]);
 }

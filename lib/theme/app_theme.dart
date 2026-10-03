@@ -12,9 +12,7 @@ class AppTheme {
     fontFamily: 'Plus Jakarta Sans',
     scaffoldBackgroundColor: AppColors.background,
 
-    // Built manually rather than ColorScheme.fromSeed: fromSeed derives
-    // its own tonal palette from one seed and quietly overrides the
-    // deliberate hex values above.
+    // Preserve the deliberately defined application color palette.
     colorScheme: const ColorScheme.light(
       primary: AppColors.primary,
       onPrimary: AppColors.textOnPrimary,
@@ -38,8 +36,7 @@ class AppTheme {
     ),
 
     appBarTheme: AppBarTheme(
-      centerTitle:
-          false, // left-aligned reads as more modern/functional than centered
+      centerTitle: false,
       elevation: 0,
       backgroundColor: AppColors.primaryDark,
       foregroundColor: AppColors.textOnPrimary,
@@ -89,9 +86,13 @@ class AppTheme {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     ),
 
+    // FIX: Do not assign infinite minimum width globally.
+    // Buttons inside Rows must be allowed to size themselves.
+    // Use Expanded or SizedBox(width: double.infinity) locally
+    // when a button should fill a bounded area.
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        minimumSize: const Size(double.infinity, AppSizes.buttonHeight),
+        minimumSize: Size(0, AppSizes.buttonHeight),
         backgroundColor: AppColors.primary,
         foregroundColor: AppColors.textOnPrimary,
         textStyle: AppTextStyles.button,
@@ -103,9 +104,10 @@ class AppTheme {
       ),
     ),
 
+    // FIX: Apply the same correction to outlined buttons.
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size(double.infinity, AppSizes.buttonHeight),
+        minimumSize: Size(0, AppSizes.buttonHeight),
         foregroundColor: AppColors.primary,
         side: const BorderSide(color: AppColors.primary, width: 1.4),
         textStyle: AppTextStyles.button.copyWith(color: AppColors.primary),
@@ -137,8 +139,7 @@ class AppGradients {
   );
 }
 
-/// Status → color/label mapping for delivery states, used by rider
-/// screens so every screen renders the same status the same way.
+/// Status-to-color/label mapping for delivery states.
 enum DeliveryStatus { assigned, pickedUp, inTransit, delivered, cancelled }
 
 extension DeliveryStatusStyle on DeliveryStatus {

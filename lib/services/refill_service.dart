@@ -9,6 +9,7 @@ class RefillService {
 
   // ------------------------------------------------------------
   // VERIFY BOTTLE
+  // Read-only: must not insert refill or audit records.
   // ------------------------------------------------------------
 
   Future<Bottle> verifyBottle(String bottleNumber) async {
@@ -26,11 +27,13 @@ class RefillService {
       }
 
       return Bottle.fromJson(Map<String, dynamic>.from(response.data['data']));
+    } on RefillException {
+      rethrow;
     } on DioException catch (e) {
-      final responseData = e.response?.data;
+      final data = e.response?.data;
 
-      if (responseData is Map && responseData['message'] != null) {
-        throw RefillException(responseData['message'].toString());
+      if (data is Map && data['message'] != null) {
+        throw RefillException(data['message'].toString());
       }
 
       throw Exception(_getDioMessage(e));
@@ -38,7 +41,66 @@ class RefillService {
   }
 
   // ------------------------------------------------------------
-  // CREATE REFILL
+  // CREATE REFILL BATCH
+  // Called only after the user presses Done Scanning Refill.
+  // ------------------------------------------------------------
+
+  Future<Map<String, dynamic>> createRefillBatch({
+    required int accId,
+    required List<String> bottleNumbers,
+    required double latitude,
+    required double longitude,
+    required double accuracy,
+  }) async {
+    if (bottleNumbers.isEmpty) {
+      throw RefillException(
+        'Scan at least one bottle before saving the batch.',
+      );
+    }
+
+    final uniqueNumbers = bottleNumbers.map((number) => number.trim()).toSet();
+
+    if (uniqueNumbers.length != bottleNumbers.length) {
+      throw RefillException('The batch contains duplicate bottle numbers.');
+    }
+
+    try {
+      final response = await _apiService.dio.post(
+        'api/refill/create_refill.php',
+        data: {
+          'accId': accId,
+          'bottleNumbers': bottleNumbers,
+          'latitude': latitude,
+          'longitude': longitude,
+          'accuracy': accuracy,
+        },
+      );
+
+      if (response.data['success'] != true) {
+        throw RefillException(
+          response.data['message']?.toString() ??
+              'Unable to save the refill batch.',
+        );
+      }
+
+      return Map<String, dynamic>.from(response.data['data'] ?? {});
+    } on RefillException {
+      rethrow;
+    } on DioException catch (e) {
+      final data = e.response?.data;
+
+      if (data is Map && data['message'] != null) {
+        throw RefillException(data['message'].toString());
+      }
+
+      throw Exception(_getDioMessage(e));
+    }
+  }
+
+  // ------------------------------------------------------------
+  // LEGACY SINGLE REFILL METHOD
+  // Retained for compatibility with other existing screens.
+  // Do not call this from the batch refill screen.
   // ------------------------------------------------------------
 
   Future<Map<String, dynamic>> createRefill({
@@ -61,32 +123,19 @@ class RefillService {
       );
 
       if (response.data['success'] != true) {
-        final message = response.data['message']?.toString();
-
-        if (message != null && message.toLowerCase().contains('already')) {
-          throw RefillException('This bottle has already been scanned.');
-        }
-
-        throw RefillException(message ?? 'Unable to record refill.');
+        throw RefillException(
+          response.data['message']?.toString() ?? 'Unable to record refill.',
+        );
       }
 
       return Map<String, dynamic>.from(response.data['data'] ?? {});
+    } on RefillException {
+      rethrow;
     } on DioException catch (e) {
-      // HTTP 409 = duplicate/conflicting refill scan.
-      if (e.response?.statusCode == 409) {
-        final responseData = e.response?.data;
+      final data = e.response?.data;
 
-        if (responseData is Map && responseData['message'] != null) {
-          throw RefillException(responseData['message'].toString());
-        }
-
-        throw RefillException('This bottle has already been scanned.');
-      }
-
-      final responseData = e.response?.data;
-
-      if (responseData is Map && responseData['message'] != null) {
-        throw RefillException(responseData['message'].toString());
+      if (data is Map && data['message'] != null) {
+        throw RefillException(data['message'].toString());
       }
 
       throw Exception(_getDioMessage(e));
@@ -153,10 +202,10 @@ class RefillService {
     final statusCode = e.response?.statusCode;
 
     if (statusCode == 400) {
-      final responseData = e.response?.data;
+      final data = e.response?.data;
 
-      if (responseData is Map && responseData['message'] != null) {
-        return responseData['message'].toString();
+      if (data is Map && data['message'] != null) {
+        return data['message'].toString();
       }
 
       return 'Invalid refill request.';
@@ -167,7 +216,13 @@ class RefillService {
     }
 
     if (statusCode == 409) {
-      return 'This bottle has already been scanned.';
+      final data = e.response?.data;
+
+      if (data is Map && data['message'] != null) {
+        return data['message'].toString();
+      }
+
+      return 'A bottle in this batch is no longer eligible.';
     }
 
     if (statusCode == 500) {
@@ -183,10 +238,6 @@ class RefillService {
     return 'Unable to process the request.';
   }
 }
-
-// ------------------------------------------------------------
-// REFILL EXCEPTION
-// ------------------------------------------------------------
 
 class RefillException implements Exception {
   final String message;

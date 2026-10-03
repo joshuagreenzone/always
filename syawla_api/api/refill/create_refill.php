@@ -1,57 +1,63 @@
+
 <?php
 
 header("Content-Type: application/json");
 
 require_once "../../config/database.php";
 
+function respond(int $status, array $payload): void
+{
+    http_response_code($status);
+    echo json_encode($payload);
+    exit;
+}
+
 try {
+    $input = json_decode(file_get_contents("php://input"), true) ?? [];
 
-    $input = json_decode(file_get_contents("php://input"), true);
+    $accId = (int)($input["accId"] ?? 0);
+    $bottleNumbers = $input["bottleNumbers"] ?? [];
 
-    $accId = (int) ($input['accId'] ?? 0);
-    $bottleNumber = trim($input['bottleNumber'] ?? '');
-
-    $latitude = isset($input['latitude'])
-        ? (float) $input['latitude']
+    $latitude = isset($input["latitude"])
+        ? (float)$input["latitude"]
         : null;
 
-    $longitude = isset($input['longitude'])
-        ? (float) $input['longitude']
+    $longitude = isset($input["longitude"])
+        ? (float)$input["longitude"]
         : null;
 
-    $accuracy = isset($input['accuracy'])
-        ? (float) $input['accuracy']
+    $accuracy = isset($input["accuracy"])
+        ? (float)$input["accuracy"]
         : null;
 
-
-    /*
-     * ---------------------------------------------------------
-     * 1. VALIDATE INPUT
-     * ---------------------------------------------------------
-     */
-
-    if ($accId <= 0) {
-
-        http_response_code(400);
-
-        echo json_encode([
+    if (
+        $accId <= 0 ||
+        !is_array($bottleNumbers) ||
+        count($bottleNumbers) === 0
+    ) {
+        respond(400, [
             "success" => false,
-            "message" => "Account ID is required."
+            "message" => "Account ID and at least one bottle are required."
         ]);
-
-        exit;
     }
 
-    if ($bottleNumber === '') {
+    $bottleNumbers = array_values(array_unique(array_map(
+        fn($number) => trim((string)$number),
+        $bottleNumbers
+    )));
 
-        http_response_code(400);
-
-        echo json_encode([
+    if (in_array("", $bottleNumbers, true)) {
+        respond(400, [
             "success" => false,
-            "message" => "Bottle number is required."
+            "message" => "The batch contains an empty bottle number."
         ]);
+    }
 
-        exit;
+    if (count($bottleNumbers) > 200) {
+        respond(400, [
+            "success" => false,
+            "message" => "A batch cannot contain more than 200 bottles."
+        ]);
     }
 
     if (
@@ -59,408 +65,277 @@ try {
         $longitude === null ||
         $accuracy === null
     ) {
-
-        http_response_code(400);
-
-        echo json_encode([
+        respond(400, [
             "success" => false,
-            "message" =>
-                "Location information is required. Please enable GPS and try again."
+            "message" => "GPS location information is required."
         ]);
-
-        exit;
     }
-
-
-    /*
-     * ---------------------------------------------------------
-     * 2. CONNECT TO DATABASE
-     * ---------------------------------------------------------
-     */
 
     $database = new Database();
     $db = $database->connect();
 
-
-    /*
-     * ---------------------------------------------------------
-     * 3. VERIFY ACCOUNT
-     * ---------------------------------------------------------
-     */
-
-    $accountSql = "
-        SELECT
-            AccID,
-            AccType
-
+    // Validate account.
+    $stmt = $db->prepare("
+        SELECT AccID, AccType
         FROM accounts
-
         WHERE AccID = :accId
-
         LIMIT 1
-    ";
+    ");
 
-    $accountStmt = $db->prepare($accountSql);
-
-    $accountStmt->execute([
-        ':accId' => $accId
+    $stmt->execute([
+        ":accId" => $accId
     ]);
 
-    $account = $accountStmt->fetch();
+    $account = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$account) {
-
-        http_response_code(403);
-
-        echo json_encode([
+        respond(403, [
             "success" => false,
             "message" => "Invalid account."
         ]);
-
-        exit;
     }
-
-
-    /*
-     * ---------------------------------------------------------
-     * 4. FIND THE BOTTLE
-     * ---------------------------------------------------------
-     */
-
-    $sql = "
-        SELECT
-            b.BottleID,
-            b.BottleNumber,
-            b.BottleTypeID,
-            bt.BottleType,
-            bt.Price
-
-        FROM bottles b
-
-        INNER JOIN bottle_types bt
-            ON b.BottleTypeID = bt.BottleTypeID
-
-        WHERE b.BottleNumber = :bottleNumber
-
-        LIMIT 1
-    ";
-
-    $stmt = $db->prepare($sql);
-
-    $stmt->execute([
-        ':bottleNumber' => $bottleNumber
-    ]);
-
-    $bottle = $stmt->fetch();
-
-    if (!$bottle) {
-
-        http_response_code(404);
-
-        echo json_encode([
-            "success" => false,
-            "message" => "Bottle not found."
-        ]);
-
-        exit;
-    }
-
-    $bottleId = (int) $bottle['BottleID'];
-
-
-    /*
-     * ---------------------------------------------------------
-     * 5. FIND THE MOST RECENT REFILL
-     * ---------------------------------------------------------
-     */
-
-    $latestRefillSql = "
-        SELECT
-            RefillID,
-            RefillDateTime
-
-        FROM refill
-
-        WHERE BottleID = :bottleId
-
-        ORDER BY RefillDateTime DESC, RefillID DESC
-
-        LIMIT 1
-    ";
-
-    $latestRefillStmt = $db->prepare($latestRefillSql);
-
-    $latestRefillStmt->execute([
-        ':bottleId' => $bottleId
-    ]);
-
-    $latestRefill = $latestRefillStmt->fetch();
-
-
-    /*
-     * ---------------------------------------------------------
-     * 6. FIND THE MOST RECENT PICKUP
-     * ---------------------------------------------------------
-     */
-
-    $latestPickupSql = "
-        SELECT
-            p.PickUpID,
-            p.PickUpDateTime,
-            p.DeliveryID
-
-        FROM delivery_pickup_transaction dpt
-
-        INNER JOIN pickup p
-            ON dpt.PickUpID = p.PickUpID
-
-        WHERE dpt.BottleID = :bottleId
-
-        ORDER BY p.PickUpDateTime DESC, p.PickUpID DESC
-
-        LIMIT 1
-    ";
-
-    $latestPickupStmt = $db->prepare($latestPickupSql);
-
-    $latestPickupStmt->execute([
-        ':bottleId' => $bottleId
-    ]);
-
-    $latestPickup = $latestPickupStmt->fetch();
-
-
-    /*
-     * ---------------------------------------------------------
-     * 7. BOTTLE MUST HAVE BEEN PICKED UP
-     * ---------------------------------------------------------
-     */
-
-    if (!$latestPickup) {
-
-        http_response_code(400);
-
-        echo json_encode([
-            "success" => false,
-            "message" =>
-                "This bottle has not been picked up yet. Only picked-up bottles can be refilled."
-        ]);
-
-        exit;
-    }
-
-
-    /*
-     * ---------------------------------------------------------
-     * 8. CHECK WHETHER ALREADY REFILLED
-     *    AFTER MOST RECENT PICKUP
-     * ---------------------------------------------------------
-     */
-
-    if (
-        $latestRefill &&
-        strtotime($latestRefill['RefillDateTime']) >=
-        strtotime($latestPickup['PickUpDateTime'])
-    ) {
-
-        http_response_code(409);
-
-        echo json_encode([
-            "success" => false,
-            "message" =>
-                "This bottle has already been refilled after its latest pickup.",
-            "data" => [
-                "BottleID" => $bottleId,
-                "BottleNumber" => $bottle['BottleNumber'],
-                "RefillID" => $latestRefill['RefillID'],
-                "RefillDateTime" => $latestRefill['RefillDateTime'],
-                "PickUpID" => $latestPickup['PickUpID'],
-                "PickUpDateTime" => $latestPickup['PickUpDateTime']
-            ]
-        ]);
-
-        exit;
-    }
-
-
-    /*
-     * ---------------------------------------------------------
-     * 9. SAFETY CHECK
-     * ---------------------------------------------------------
-     *
-     * Make sure the bottle has not already been processed
-     * for another delivery after its latest pickup.
-     */
-
-    $deliverySql = "
-        SELECT
-            odt.ODTID,
-            odt.OrderID,
-            odt.DeliveryID,
-            d.DeliveryStatus,
-            d.DeliveryDateTime
-
-        FROM order_delivery_transaction odt
-
-        INNER JOIN delivery d
-            ON odt.DeliveryID = d.DeliveryID
-
-        WHERE odt.BottleID = :bottleId
-
-          AND d.DeliveryDateTime >
-              :pickupDateTime
-
-        ORDER BY d.DeliveryDateTime DESC,
-                 odt.ODTID DESC
-
-        LIMIT 1
-    ";
-
-    $deliveryStmt = $db->prepare($deliverySql);
-
-    $deliveryStmt->execute([
-        ':bottleId' => $bottleId,
-        ':pickupDateTime' => $latestPickup['PickUpDateTime']
-    ]);
-
-    $delivery = $deliveryStmt->fetch();
-
-    if ($delivery) {
-
-        http_response_code(409);
-
-        echo json_encode([
-            "success" => false,
-            "message" =>
-                "This bottle has already been processed for delivery and cannot be refilled at this time.",
-            "data" => [
-                "BottleID" => $bottleId,
-                "BottleNumber" => $bottle['BottleNumber'],
-                "DeliveryID" => $delivery['DeliveryID'],
-                "DeliveryStatus" => $delivery['DeliveryStatus'],
-                "DeliveryDateTime" => $delivery['DeliveryDateTime']
-            ]
-        ]);
-
-        exit;
-    }
-
-
-    /*
-     * ---------------------------------------------------------
-     * 10. CREATE REFILL + SCAN EVENT
-     * ---------------------------------------------------------
-     *
-     * Both records are created in one transaction.
-     *
-     * If either insert fails, neither record is saved.
-     */
 
     $db->beginTransaction();
 
     try {
+        $saved = [];
 
-        /*
-         * Create refill record.
-         */
+        foreach ($bottleNumbers as $bottleNumber) {
+            // Lock the bottle record during validation and saving.
+            $stmt = $db->prepare("
+                SELECT
+                    b.BottleID,
+                    b.BottleNumber,
+                    b.BottleTypeID,
+                    bt.BottleType,
+                    bt.Price
+                FROM bottles b
+                INNER JOIN bottle_types bt
+                    ON bt.BottleTypeID = b.BottleTypeID
+                WHERE b.BottleNumber = :bottleNumber
+                LIMIT 1
+                FOR UPDATE
+            ");
 
-        $insertSql = "
-            INSERT INTO refill
-            (
-                BottleID,
-                RefillDateTime
-            )
-            VALUES
-            (
-                :bottleId,
-                CURRENT_TIMESTAMP
-            )
-        ";
+            $stmt->execute([
+                ":bottleNumber" => $bottleNumber
+            ]);
 
-        $insertStmt = $db->prepare($insertSql);
+            $bottle = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        $insertStmt->execute([
-            ':bottleId' => $bottleId
-        ]);
+            if (!$bottle) {
+                throw new DomainException(
+                    "Bottle {$bottleNumber} was not found. No records were saved."
+                );
+            }
 
-        $refillId = (int) $db->lastInsertId();
+            $bottleId = (int)$bottle["BottleID"];
 
+            // Get latest refill.
+            $stmt = $db->prepare("
+                SELECT RefillID, RefillDateTime
+                FROM refill
+                WHERE BottleID = :bottleId
+                ORDER BY RefillDateTime DESC, RefillID DESC
+                LIMIT 1
+            ");
 
-        /*
-         * Create immutable bottle scan audit record.
-         */
+            $stmt->execute([
+                ":bottleId" => $bottleId
+            ]);
 
-        $scanSql = "
-            INSERT INTO bottle_scan_event
-            (
-                BottleID,
-                AccID,
-                EventType,
-                RefillID,
-                ScanDateTime,
-                Latitude,
-                Longitude,
-                LocationAccuracy
-            )
-            VALUES
-            (
-                :bottleId,
-                :accId,
-                'REFILL_SCAN',
-                :refillId,
-                CURRENT_TIMESTAMP,
-                :latitude,
-                :longitude,
-                :accuracy
-            )
-        ";
+            $latestRefill = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        $scanStmt = $db->prepare($scanSql);
+            // Get latest premise movement.
+            $stmt = $db->prepare("
+                SELECT MovementID, MovementType, MovementDateTime
+                FROM premise_bottle_movement
+                WHERE BottleID = :bottleId
+                ORDER BY MovementDateTime DESC, MovementID DESC
+                LIMIT 1
+            ");
 
-        $scanStmt->execute([
-            ':bottleId' => $bottleId,
-            ':accId' => $accId,
-            ':refillId' => $refillId,
-            ':latitude' => $latitude,
-            ':longitude' => $longitude,
-            ':accuracy' => $accuracy
-        ]);
+            $stmt->execute([
+                ":bottleId" => $bottleId
+            ]);
 
-        $scanEventId = (int) $db->lastInsertId();
+            $latestMovement = $stmt->fetch(PDO::FETCH_ASSOC);
 
+            // Get latest bottle scan event.
+            $stmt = $db->prepare("
+                SELECT EventType, ScanDateTime
+                FROM bottle_scan_event
+                WHERE BottleID = :bottleId
+                ORDER BY ScanDateTime DESC
+                LIMIT 1
+            ");
 
-        /*
-         * Commit both records.
-         */
+            $stmt->execute([
+                ":bottleId" => $bottleId
+            ]);
 
+            $latestScanEvent = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            /*
+             * Allow if:
+             * - Latest premise movement is RETURN; OR
+             * - Latest bottle scan event is PICKUP_SCAN.
+             */
+            $allowedByMovement =
+                $latestMovement &&
+                strtoupper(trim($latestMovement["MovementType"])) === "RETURN";
+
+            $allowedByPickupScan =
+                $latestScanEvent &&
+                strtoupper(trim($latestScanEvent["EventType"])) === "PICKUP_SCAN";
+
+            /*
+             * No movement and no pickup scan:
+             * permit a first refill only for a genuinely new bottle.
+             */
+            if (!$latestMovement && !$allowedByPickupScan) {
+                $stmt = $db->prepare("
+                    SELECT COUNT(*)
+                    FROM order_delivery_transaction
+                    WHERE BottleID = :bottleId
+                ");
+
+                $stmt->execute([
+                    ":bottleId" => $bottleId
+                ]);
+
+                $deliveryCount = (int)$stmt->fetchColumn();
+
+                if ($latestRefill || $deliveryCount > 0) {
+                    throw new DomainException(
+                        "Bottle {$bottleNumber} has previous activity but no "
+                        . "premise movement history or valid pickup scan. "
+                        . "No records were saved."
+                    );
+                }
+            } elseif (!$allowedByMovement && !$allowedByPickupScan) {
+                throw new DomainException(
+                    "Bottle {$bottleNumber} is not eligible for refill. "
+                    . "Its latest premise movement is not RETURN and "
+                    . "its latest scan event is not PICKUP_SCAN. "
+                    . "No records were saved."
+                );
+            }
+
+            // Prevent duplicate refill after the latest RETURN movement.
+            if (
+                $allowedByMovement &&
+                $latestRefill &&
+                strtotime($latestRefill["RefillDateTime"]) >=
+                strtotime($latestMovement["MovementDateTime"])
+            ) {
+                throw new DomainException(
+                    "Bottle {$bottleNumber} has already been refilled "
+                    . "after its latest return. No records were saved."
+                );
+            }
+
+            /*
+             * If eligibility is based on PICKUP_SCAN, prevent a duplicate
+             * refill after that scan.
+             */
+            if (
+                !$allowedByMovement &&
+                $allowedByPickupScan &&
+                $latestRefill &&
+                strtotime($latestRefill["RefillDateTime"]) >=
+                strtotime($latestScanEvent["ScanDateTime"])
+            ) {
+                throw new DomainException(
+                    "Bottle {$bottleNumber} has already been refilled "
+                    . "after its latest pickup scan. No records were saved."
+                );
+            }
+
+            // Save refill.
+            $stmt = $db->prepare("
+                INSERT INTO refill (
+                    BottleID,
+                    RefillDateTime
+                )
+                VALUES (
+                    :bottleId,
+                    CURRENT_TIMESTAMP
+                )
+            ");
+
+            $stmt->execute([
+                ":bottleId" => $bottleId
+            ]);
+
+            $refillId = (int)$db->lastInsertId();
+
+            // Save refill audit event.
+            $stmt = $db->prepare("
+                INSERT INTO bottle_scan_event (
+                    BottleID,
+                    AccID,
+                    EventType,
+                    RefillID,
+                    ScanDateTime,
+                    Latitude,
+                    Longitude,
+                    LocationAccuracy
+                )
+                VALUES (
+                    :bottleId,
+                    :accId,
+                    'REFILL_SCAN',
+                    :refillId,
+                    CURRENT_TIMESTAMP,
+                    :latitude,
+                    :longitude,
+                    :accuracy
+                )
+            ");
+
+            $stmt->execute([
+                ":bottleId" => $bottleId,
+                ":accId" => $accId,
+                ":refillId" => $refillId,
+                ":latitude" => $latitude,
+                ":longitude" => $longitude,
+                ":accuracy" => $accuracy
+            ]);
+
+            $saved[] = [
+                "RefillID" => $refillId,
+                "BottleID" => $bottleId,
+                "BottleNumber" => $bottle["BottleNumber"],
+                "BottleTypeID" => (int)$bottle["BottleTypeID"],
+                "BottleType" => $bottle["BottleType"],
+                "Price" => (float)$bottle["Price"]
+            ];
+        }
+
+        // Save the batch only when every bottle passes validation.
         $db->commit();
 
-
-        /*
-         * -----------------------------------------------------
-         * 11. RETURN SUCCESS
-         * -----------------------------------------------------
-         */
-
-        echo json_encode([
+        respond(200, [
             "success" => true,
-            "message" => "Bottle refilled successfully.",
+            "message" => "Successfully saved " . count($saved) . " refill(s).",
             "data" => [
-                "RefillID" => $refillId,
-                "ScanEventID" => $scanEventId,
-                "BottleID" => $bottleId,
-                "BottleNumber" => $bottle['BottleNumber'],
-                "BottleTypeID" => $bottle['BottleTypeID'],
-                "BottleType" => $bottle['BottleType'],
-                "Price" => $bottle['Price'],
-                "Latitude" => $latitude,
-                "Longitude" => $longitude,
-                "LocationAccuracy" => $accuracy
+                "count" => count($saved),
+                "refills" => $saved
             ]
         ]);
 
-    } catch (Throwable $e) {
+    } catch (DomainException $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
 
+        respond(409, [
+            "success" => false,
+            "message" => $e->getMessage()
+        ]);
+
+    } catch (Throwable $e) {
         if ($db->inTransaction()) {
             $db->rollBack();
         }
@@ -469,11 +344,18 @@ try {
     }
 
 } catch (PDOException $e) {
+    error_log("Refill batch database error: " . $e->getMessage());
 
-    http_response_code(500);
-
-    echo json_encode([
+    respond(500, [
         "success" => false,
-        "message" => "Database error."
+        "message" => "Database error while saving refill batch."
+    ]);
+
+} catch (Throwable $e) {
+    error_log("Refill batch error: " . $e->getMessage());
+
+    respond(500, [
+        "success" => false,
+        "message" => "Unable to save refill batch."
     ]);
 }

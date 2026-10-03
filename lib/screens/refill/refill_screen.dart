@@ -8,7 +8,6 @@ import '../../services/refill_service.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
-import '../../theme/app_text_styles.dart';
 
 class RefillScreen extends StatefulWidget {
   final Account account;
@@ -21,20 +20,32 @@ class RefillScreen extends StatefulWidget {
 
 class _RefillScreenState extends State<RefillScreen> {
   final RefillService _refillService = RefillService();
+  final MobileScannerController _scannerController = MobileScannerController();
 
-  Bottle? _scannedBottle;
+  final List<Bottle> _batch = [];
+  final Set<String> _batchNumbers = {};
 
   bool _isScanning = false;
-  bool _isLoading = false;
+  bool _isVerifying = false;
+  bool _isSaving = false;
+  bool _scanLocked = false;
 
   String? _errorMessage;
+  String? _lastScannedNumber;
 
-  void _scanBottle() {
+  @override
+  void dispose() {
+    _scannerController.dispose();
+    super.dispose();
+  }
+
+  void _startScanning() {
+    if (_isSaving || _isVerifying) return;
+
     setState(() {
-      _scannedBottle = null;
-      _errorMessage = null;
       _isScanning = true;
-      _isLoading = false;
+      _scanLocked = false;
+      _errorMessage = null;
     });
   }
 
@@ -43,7 +54,8 @@ class _RefillScreenState extends State<RefillScreen> {
 
     if (!serviceEnabled) {
       throw Exception(
-        'Location services are turned off. Please enable GPS and try again.',
+        'Location services are turned off. '
+        'Please enable GPS and try again.',
       );
     }
 
@@ -51,76 +63,163 @@ class _RefillScreenState extends State<RefillScreen> {
 
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-
-      if (permission == LocationPermission.denied) {
-        throw Exception('Location permission was denied.');
-      }
     }
 
-    if (permission == LocationPermission.deniedForever) {
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
       throw Exception(
-        'Location permission is permanently denied. '
-        'Please enable it from the app settings.',
+        'Location permission is required to save the refill batch. '
+        'Please enable location access in your device settings.',
       );
     }
 
-    return await Geolocator.getCurrentPosition(
+    return Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     );
   }
 
   Future<void> _handleQrCode(String value) async {
-    if (!_isScanning) return;
+    final number = value.trim();
+
+    if (!_isScanning ||
+        _scanLocked ||
+        _isVerifying ||
+        _isSaving ||
+        number.isEmpty) {
+      return;
+    }
+
+    _scanLocked = true;
+
+    if (_batchNumbers.contains(number)) {
+      setState(() {
+        _lastScannedNumber = number;
+        _errorMessage = 'Bottle $number is already in this batch.';
+      });
+
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      if (mounted && _isScanning) {
+        setState(() {
+          _errorMessage = null;
+          _scanLocked = false;
+        });
+      }
+
+      return;
+    }
 
     setState(() {
-      _isScanning = false;
-      _isLoading = true;
+      _isVerifying = true;
+      _lastScannedNumber = number;
       _errorMessage = null;
     });
 
     try {
-      final bottle = await _refillService.verifyBottle(value);
+      // Verification must remain read-only.
+      final bottle = await _refillService.verifyBottle(number);
 
       if (!mounted) return;
 
-      setState(() {
-        _scannedBottle = bottle;
-        _isLoading = false;
-      });
+      final verifiedNumber = bottle.bottleNumber.trim();
+
+      if (_batchNumbers.contains(verifiedNumber)) {
+        setState(() {
+          _errorMessage = 'Bottle $verifiedNumber is already in this batch.';
+        });
+      } else {
+        setState(() {
+          _batch.add(bottle);
+          _batchNumbers.add(verifiedNumber);
+          _errorMessage = null;
+        });
+      }
     } on RefillException catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _isLoading = false;
-      });
-
-      await _showInvalidBottleDialog(e.message, value);
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.message;
+        });
+      }
     } catch (e) {
-      if (!mounted) return;
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isVerifying = false;
+        });
 
-      setState(() {
-        _isLoading = false;
-        _errorMessage = _cleanError(e);
-      });
+        await Future.delayed(const Duration(milliseconds: 900));
+
+        if (mounted && _isScanning) {
+          setState(() {
+            _scanLocked = false;
+          });
+        }
+      }
     }
   }
 
-  Future<void> _confirmRefill() async {
-    final bottle = _scannedBottle;
-
-    if (bottle == null) return;
+  Future<void> _finishScanning() async {
+    if (_batch.isEmpty || _isSaving || _isVerifying) return;
 
     setState(() {
-      _isLoading = true;
+      _isScanning = false;
+      _errorMessage = null;
+    });
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Save Refill Batch?'),
+          content: Text(
+            'You have verified ${_batch.length} bottle(s).\n\n'
+            'Save their refill records and REFILL_SCAN audit '
+            'records now?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Continue Scanning'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Save Batch'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) return;
+
+    if (confirmed != true) {
+      setState(() {
+        _isScanning = true;
+      });
+      return;
+    }
+
+    final bottleNumbers = _batch
+        .map((bottle) => bottle.bottleNumber)
+        .toList(growable: false);
+
+    setState(() {
+      _isSaving = true;
       _errorMessage = null;
     });
 
     try {
       final position = await _getCurrentLocation();
 
-      await _refillService.createRefill(
+      final result = await _refillService.createRefillBatch(
         accId: widget.account.accId,
-        bottleNumber: bottle.bottleNumber,
+        bottleNumbers: bottleNumbers,
         latitude: position.latitude,
         longitude: position.longitude,
         accuracy: position.accuracy,
@@ -128,77 +227,56 @@ class _RefillScreenState extends State<RefillScreen> {
 
       if (!mounted) return;
 
+      final savedCount = result['count'] is num
+          ? (result['count'] as num).toInt()
+          : bottleNumbers.length;
+
       setState(() {
-        _isLoading = false;
-        _scannedBottle = null;
+        _batch.clear();
+        _batchNumbers.clear();
+        _lastScannedNumber = null;
+        _isSaving = false;
       });
 
       await _showSuccessDialog(
-        '${bottle.bottleNumber} has been successfully recorded as refilled.',
+        result['message']?.toString() ??
+            'Successfully saved $savedCount refill(s).',
       );
     } on RefillException catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _isLoading = false;
-      });
-
-      await _showInvalidBottleDialog(e.message, bottle.bottleNumber);
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _errorMessage = e.message;
+        });
+      }
     } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _isLoading = false;
-        _errorMessage = _cleanError(e);
-      });
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
     }
   }
 
   Future<void> _showSuccessDialog(String message) async {
-    await showDialog(
+    await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppSizes.radiusLg),
-          ),
           title: const Row(
             children: [
-              Icon(
-                Icons.check_circle_rounded,
-                color: Color(0xFF10B981),
-                size: 28,
-              ),
-              SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  'Refill Successful',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                ),
-              ),
+              Icon(Icons.check_circle, color: Color(0xFF10B981)),
+              SizedBox(width: 8),
+              Expanded(child: Text('Refill Batch Saved')),
             ],
           ),
-          content: Text(
-            message,
-            style: const TextStyle(fontSize: 14, color: Color(0xFF475569)),
-          ),
+          content: Text(message),
           actions: [
             ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0284C7),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
               onPressed: () => Navigator.pop(dialogContext),
-              child: const Text(
-                'OK',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              child: const Text('OK'),
             ),
           ],
         );
@@ -206,59 +284,59 @@ class _RefillScreenState extends State<RefillScreen> {
     );
   }
 
-  Future<void> _showInvalidBottleDialog(
-    String message,
-    String bottleNumber,
-  ) async {
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppSizes.radiusLg),
-          ),
-          title: const Row(
-            children: [
-              Icon(Icons.cancel_rounded, color: AppColors.error, size: 28),
-              SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  'Invalid Bottle',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                ),
-              ),
-            ],
-          ),
-          content: Text(
-            '$message\n\nBottle: $bottleNumber',
-            style: const TextStyle(fontSize: 14, color: Color(0xFF475569)),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text(
-                'OK',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
+  void _stopScanning() {
+    if (_isVerifying || _isSaving) return;
 
-  void _resetScan() {
     setState(() {
-      _scannedBottle = null;
-      _errorMessage = null;
       _isScanning = false;
-      _isLoading = false;
+      _scanLocked = false;
+      _errorMessage = null;
     });
   }
 
-  String _cleanError(Object error) {
-    return error.toString().replaceFirst('Exception: ', '');
+  void _removeBottle(Bottle bottle) {
+    if (_isVerifying || _isSaving) return;
+
+    setState(() {
+      _batch.remove(bottle);
+      _batchNumbers.remove(bottle.bottleNumber.trim());
+    });
+  }
+
+  Future<void> _clearBatch() async {
+    if (_isSaving || _isVerifying || _batch.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Clear Batch?'),
+          content: const Text(
+            'Remove all verified bottles from this temporary '
+            'batch? No refill records have been saved yet.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep Bottles'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Clear Batch'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted || confirmed != true) return;
+
+    setState(() {
+      _batch.clear();
+      _batchNumbers.clear();
+      _errorMessage = null;
+      _lastScannedNumber = null;
+    });
   }
 
   @override
@@ -267,430 +345,356 @@ class _RefillScreenState extends State<RefillScreen> {
       backgroundColor: const Color(0xFFF4F6F9),
       appBar: AppBar(
         title: const Text(
-          'Refill Bottle',
-          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.3),
+          'Refill Bottles',
+          style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        elevation: 0,
-        scrolledUnderElevation: 2,
         centerTitle: true,
+        elevation: 0,
       ),
-      body: _buildBody(),
+      body: _isSaving ? _buildSavingScreen() : _buildContent(),
     );
   }
 
-  Widget _buildBody() {
-    if (_isScanning) {
-      return _buildScanner();
-    }
-
-    if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(color: Color(0xFF0284C7)),
-      );
-    }
-
-    if (_errorMessage != null) {
-      return _buildError();
-    }
-
-    if (_scannedBottle != null) {
-      return _buildBottleConfirmation();
-    }
-
-    return _buildStartScreen();
+  Widget _buildSavingScreen() {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(color: Color(0xFF0284C7)),
+          SizedBox(height: 16),
+          Text(
+            'Saving refill batch...',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          SizedBox(height: 6),
+          Text(
+            'Please do not close the app.',
+            style: TextStyle(color: Color(0xFF64748B)),
+          ),
+        ],
+      ),
+    );
   }
 
-  Widget _buildStartScreen() {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSizes.screenPadding),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+  Widget _buildContent() {
+    return SafeArea(
+      child: Column(
+        children: [
+          if (_isScanning) _buildScanner(),
+
+          if (_errorMessage != null)
             Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0284C7).withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.water_drop_rounded,
-                size: 72,
-                color: Color(0xFF0284C7),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            const Text(
-              'Register Bottle Refill',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1E293B),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
-              child: Text(
-                'Scan the QR code on the water gallon to verify its identity before processing.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFF64748B),
-                  height: 1.4,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xl * 1.5),
-            SizedBox(
               width: double.infinity,
-              height: 52,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.error.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.error.withOpacity(0.25)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.error_outline, color: AppColors.error),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _errorMessage!,
+                      style: const TextStyle(color: AppColors.error),
+                    ),
                   ),
-                  elevation: 2,
-                ),
-                onPressed: _scanBottle,
-                icon: const Icon(
-                  Icons.qr_code_scanner_rounded,
-                  color: Colors.white,
-                ),
-                label: const Text(
-                  'SCAN QR CODE',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        _errorMessage = null;
+                      });
+                    },
+                    icon: const Icon(Icons.close, size: 18),
                   ),
-                ),
+                ],
               ),
             ),
-          ],
-        ),
+
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0284C7).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.water_drop_rounded,
+                    color: Color(0xFF0284C7),
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Current Refill Batch',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+                      Text(
+                        '${_batch.length} bottle(s) verified',
+                        style: const TextStyle(color: Color(0xFF64748B)),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!_isScanning)
+                  ElevatedButton.icon(
+                    onPressed: _isVerifying ? null : _startScanning,
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Scan'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0284C7),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          Expanded(
+            child: _batch.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.qr_code_scanner_rounded,
+                            size: 58,
+                            color: Colors.blueGrey.shade200,
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'No bottles scanned yet',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF475569),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Start scanning to add bottles to your '
+                            'temporary refill batch.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _batch.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 6),
+                    itemBuilder: (context, index) {
+                      final bottle = _batch[index];
+
+                      return Card(
+                        margin: EdgeInsets.zero,
+                        color: Colors.white,
+                        child: ListTile(
+                          leading: const CircleAvatar(
+                            backgroundColor: Color(0xFFDCFCE7),
+                            child: Icon(
+                              Icons.check_rounded,
+                              color: Color(0xFF16A34A),
+                            ),
+                          ),
+                          title: Text(
+                            bottle.bottleNumber,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1E293B),
+                            ),
+                          ),
+                          subtitle: Text(
+                            '${bottle.bottleType}\n'
+                            '₱${bottle.price.toStringAsFixed(2)}',
+                          ),
+                          isThreeLine: true,
+                          trailing: IconButton(
+                            tooltip: 'Remove from batch',
+                            onPressed: _isVerifying || _isSaving
+                                ? null
+                                : () => _removeBottle(bottle),
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: AppColors.error,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+
+          // The bottom controls are laid out in a bounded-width
+          // Column. Avoid putting a full-width button directly
+          // inside a Row without Expanded or Flexible.
+          Padding(
+            padding: const EdgeInsets.all(AppSizes.screenPadding),
+            child: SizedBox(
+              width: double.infinity,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_isScanning)
+                    OutlinedButton.icon(
+                      onPressed: _isVerifying ? null : _stopScanning,
+                      icon: const Icon(Icons.stop_circle_outlined),
+                      label: Text(
+                        _isVerifying ? 'VERIFYING BOTTLE...' : 'STOP SCANNING',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 46),
+                      ),
+                    ),
+
+                  if (!_isScanning && _batch.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: _isVerifying ? null : _clearBatch,
+                      icon: const Icon(Icons.delete_sweep_outlined),
+                      label: const Text('Clear Batch'),
+                    ),
+
+                  const SizedBox(height: AppSpacing.sm),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed:
+                          _batch.isEmpty ||
+                              _isScanning ||
+                              _isVerifying ||
+                              _isSaving
+                          ? null
+                          : _finishScanning,
+                      icon: const Icon(Icons.done_all_rounded),
+                      label: Text(
+                        'DONE SCANNING REFILL (${_batch.length})',
+                        textAlign: TextAlign.center,
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(0, 52),
+                        backgroundColor: const Color(0xFF0284C7),
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.grey.shade300,
+                      ),
+                    ),
+                  ),
+
+                  if (_isScanning)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Bottles are not saved until you finish '
+                        'the batch.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildScanner() {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        MobileScanner(
-          onDetect: (capture) {
-            if (capture.barcodes.isEmpty) return;
+    return SizedBox(
+      height: 280,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          MobileScanner(
+            controller: _scannerController,
+            onDetect: (capture) {
+              if (capture.barcodes.isEmpty) return;
 
-            final barcode = capture.barcodes.first;
-            final value = barcode.rawValue;
+              final value = capture.barcodes.first.rawValue;
 
-            if (value == null || value.trim().isEmpty) return;
+              if (value != null && value.trim().isNotEmpty) {
+                _handleQrCode(value);
+              }
+            },
+          ),
 
-            _handleQrCode(value.trim());
-          },
-        ),
-        Positioned(
-          top: AppSpacing.lg,
-          left: AppSpacing.lg,
-          right: AppSpacing.lg,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.75),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Text(
-              'Point your camera at the QR code on the bottle',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
+          Center(
+            child: Container(
+              width: 230,
+              height: 170,
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFF38BDF8), width: 3),
+                borderRadius: BorderRadius.circular(20),
               ),
-              textAlign: TextAlign.center,
             ),
           ),
-        ),
-        Center(
-          child: Container(
-            width: 240,
-            height: 240,
-            decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xFF0284C7), width: 3),
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF0284C7).withOpacity(0.3),
-                  blurRadius: 20,
-                  spreadRadius: 2,
-                ),
-              ],
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: AppSpacing.xl,
-          left: AppSpacing.lg,
-          right: AppSpacing.lg,
-          child: SizedBox(
-            height: 50,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: const Color(0xFF1E293B),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+
+          Positioned(
+            top: 12,
+            left: 12,
+            right: 12,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.75),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                _isVerifying
+                    ? 'Verifying $_lastScannedNumber...'
+                    : 'Scan the next bottle • '
+                          '${_batch.length} verified',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              onPressed: _resetScan,
+            ),
+          ),
+
+          Positioned(
+            bottom: 12,
+            left: 12,
+            right: 12,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.65),
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: const Text(
-                'CANCEL',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
-                ),
+                'Keep scanning. Press Stop Scanning when finished.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 12),
               ),
             ),
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBottleConfirmation() {
-    final bottle = _scannedBottle!;
-
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSizes.screenPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: AppSpacing.md),
-            Center(
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.check_circle_rounded,
-                  size: 56,
-                  color: Color(0xFF10B981),
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            const Text(
-              'Bottle Verified',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1E293B),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: const Color(0xFF0284C7).withOpacity(0.2),
-                  width: 1.2,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF0284C7).withOpacity(0.08),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _InfoItem(
-                      label: 'Bottle Number',
-                      value: bottle.bottleNumber,
-                      valueStyle: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1E293B),
-                      ),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Divider(height: 1, color: Color(0xFFE2E8F0)),
-                    ),
-                    _InfoItem(
-                      label: 'Bottle Type',
-                      value: bottle.bottleType,
-                      valueStyle: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF0284C7),
-                      ),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Divider(height: 1, color: Color(0xFFE2E8F0)),
-                    ),
-                    _InfoItem(
-                      label: 'Refill Price',
-                      value: '₱${bottle.price.toStringAsFixed(2)}',
-                      valueStyle: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF10B981),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xl * 1.5),
-            SizedBox(
-              height: 52,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  elevation: 2,
-                ),
-                onPressed: _confirmRefill,
-                icon: const Icon(Icons.water_drop_rounded, color: Colors.white),
-                label: const Text(
-                  'CONFIRM REFILL',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            SizedBox(
-              height: 50,
-              child: OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF64748B),
-                  side: const BorderSide(color: Color(0xFFCBD5E1)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                onPressed: _resetScan,
-                child: const Text(
-                  'SCAN DIFFERENT BOTTLE',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
-    );
-  }
-
-  Widget _buildError() {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSizes.screenPadding),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.error.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.error_outline_rounded,
-                size: 48,
-                color: AppColors.error,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            const Text(
-              'Unable to Verify Bottle',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1E293B),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              _errorMessage!,
-              style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SizedBox(
-              width: 180,
-              height: 44,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                onPressed: _resetScan,
-                child: const Text(
-                  'TRY AGAIN',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _InfoItem extends StatelessWidget {
-  final String label;
-  final String value;
-  final TextStyle? valueStyle;
-
-  const _InfoItem({required this.label, required this.value, this.valueStyle});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF94A3B8),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style:
-              valueStyle ??
-              const TextStyle(fontSize: 15, color: Color(0xFF1E293B)),
-        ),
-      ],
     );
   }
 }

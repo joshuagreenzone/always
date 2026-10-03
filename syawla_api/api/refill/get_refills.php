@@ -6,27 +6,25 @@ header("Content-Type: application/json");
 require_once "../../config/database.php";
 
 try {
-
     $database = new Database();
     $db = $database->connect();
 
     /*
-     * ---------------------------------------------------------
-     * GET CURRENT REFILLED BOTTLES
-     * ---------------------------------------------------------
+     * =========================================================
+     * GET READY-TO-DELIVER REFILLED BOTTLES
+     * =========================================================
      *
-     * This endpoint returns ONLY bottles that are currently
-     * refilled and ready for delivery.
+     * Rules:
+     * 1. The bottle must have a refill record.
+     * 2. Only its latest refill is considered.
+     * 3. If movement history exists, the latest movement
+     *    must be RETURN and must not be after the refill.
+     * 4. A bottle with no movement history can still qualify.
+     * 5. A RELEASE must be resolved by a RETURN linked through
+     *    RelatedMovementID.
+     * 6. A delivery after the latest refill excludes the bottle.
      *
-     * A bottle is considered available when:
-     *
-     * 1. It has a refill record.
-     * 2. That refill is the bottle's latest refill.
-     * 3. The bottle has NOT been scanned into a delivery
-     *    after that refill.
-     *
-     * Old refill records remain in the database and will later
-     * be available through the Refill History endpoint.
+     * Historical refill records are never deleted.
      */
 
     $sql = "
@@ -34,53 +32,99 @@ try {
             r.RefillID,
             r.BottleID,
             r.RefillDateTime,
-
             b.BottleNumber,
             b.BottleTypeID,
-
             bt.BottleType,
             bt.Price
 
         FROM refill r
 
         INNER JOIN bottles b
-            ON r.BottleID = b.BottleID
+            ON b.BottleID = r.BottleID
 
         INNER JOIN bottle_types bt
-            ON b.BottleTypeID = bt.BottleTypeID
+            ON bt.BottleTypeID = b.BottleTypeID
 
-        /*
-         * Only use the latest refill for each bottle.
-         */
-        WHERE r.RefillID = (
-            SELECT r2.RefillID
-
+        /* Only the latest refill for each bottle. */
+        WHERE NOT EXISTS (
+            SELECT 1
             FROM refill r2
-
             WHERE r2.BottleID = r.BottleID
-
-            ORDER BY
-                r2.RefillDateTime DESC,
-                r2.RefillID DESC
-
-            LIMIT 1
+              AND (
+                    r2.RefillDateTime > r.RefillDateTime
+                    OR (
+                        r2.RefillDateTime = r.RefillDateTime
+                        AND r2.RefillID > r.RefillID
+                    )
+              )
         )
 
         /*
-         * The bottle must NOT have been scanned into a
-         * delivery after this refill.
+         * If movement history exists, the latest movement
+         * must be RETURN and must occur no later than refill.
+         * Bottles with no movement history are allowed.
+         */
+        AND (
+            NOT EXISTS (
+                SELECT 1
+                FROM premise_bottle_movement pm
+                WHERE pm.BottleID = r.BottleID
+            )
+
+            OR EXISTS (
+                SELECT 1
+                FROM premise_bottle_movement pm
+                WHERE pm.BottleID = r.BottleID
+                  AND pm.MovementType = 'RETURN'
+                  AND pm.MovementDateTime <= r.RefillDateTime
+
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM premise_bottle_movement newer
+                      WHERE newer.BottleID = pm.BottleID
+                        AND (
+                            newer.MovementDateTime >
+                                pm.MovementDateTime
+                            OR (
+                                newer.MovementDateTime =
+                                    pm.MovementDateTime
+                                AND newer.MovementID > pm.MovementID
+                            )
+                        )
+                  )
+            )
+        )
+
+        /*
+         * Exclude bottles with a RELEASE that has not been
+         * resolved by a RETURN referencing that release.
          */
         AND NOT EXISTS (
-
             SELECT 1
+            FROM premise_bottle_movement rel
+            WHERE rel.BottleID = r.BottleID
+              AND rel.MovementType = 'RELEASE'
 
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM premise_bottle_movement ret
+                  WHERE ret.MovementType = 'RETURN'
+                    AND ret.RelatedMovementID = rel.MovementID
+              )
+        )
+
+        /*
+         * A delivery recorded after refill means the bottle
+         * is no longer ready stock.
+         */
+        AND NOT EXISTS (
+            SELECT 1
             FROM order_delivery_transaction odt
 
             INNER JOIN delivery d
-                ON odt.DeliveryID = d.DeliveryID
+                ON d.DeliveryID = odt.DeliveryID
 
             WHERE odt.BottleID = r.BottleID
-
               AND d.DeliveryDateTime > r.RefillDateTime
         )
 
@@ -92,7 +136,7 @@ try {
     $stmt = $db->prepare($sql);
     $stmt->execute();
 
-    $refills = $stmt->fetchAll();
+    $refills = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     echo json_encode([
         "success" => true,
@@ -100,7 +144,6 @@ try {
     ]);
 
 } catch (PDOException $e) {
-
     http_response_code(500);
 
     echo json_encode([
@@ -108,4 +151,3 @@ try {
         "message" => "Database error."
     ]);
 }
-
