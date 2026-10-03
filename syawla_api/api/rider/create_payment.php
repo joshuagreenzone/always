@@ -1,538 +1,463 @@
 
 <?php
 
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 
 require_once '../../config/database.php';
 
 $db = null;
 
-try {
+function respond(int $status, array $body): void
+{
+    http_response_code($status);
+    echo json_encode($body);
+    exit;
+}
 
+function rollbackIfNeeded(?PDO $db): void
+{
+    if ($db !== null && $db->inTransaction()) {
+        $db->rollBack();
+    }
+}
+
+try {
     $database = new Database();
     $db = $database->connect();
+    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     /*
-     * =========================================================
-     * READ REQUEST
-     * =========================================================
-     *
-     * Multipart/form-data
+     * Read multipart/form-data request.
      */
-
-    $accId = isset($_POST['accId'])
-        ? (int) $_POST['accId']
-        : 0;
-
-    $orderId = isset($_POST['orderId'])
-        ? (int) $_POST['orderId']
-        : 0;
-
-    $paymentAmount = isset($_POST['paymentAmount'])
-        ? (float) $_POST['paymentAmount']
-        : 0;
-
-    $paymentType = isset($_POST['paymentType'])
-        ? trim($_POST['paymentType'])
-        : '';
-
-    $notes = isset($_POST['notes'])
-        ? trim($_POST['notes'])
-        : '';
-
-    /*
-     * =========================================================
-     * BASIC VALIDATION
-     * =========================================================
-     */
+    $accId = (int)($_POST['accId'] ?? 0);
+    $orderId = (int)($_POST['orderId'] ?? 0);
+    $paymentAmount = filter_var(
+        $_POST['paymentAmount'] ?? null,
+        FILTER_VALIDATE_FLOAT
+    );
+    $paymentType = strtoupper(trim($_POST['paymentType'] ?? ''));
+    $notes = trim($_POST['notes'] ?? '');
 
     if ($accId <= 0 || $orderId <= 0) {
-
-        http_response_code(400);
-
-        echo json_encode([
+        respond(400, [
             'success' => false,
             'message' => 'Invalid account or order.'
         ]);
-
-        exit;
     }
 
-    if ($paymentAmount <= 0) {
-
-        http_response_code(400);
-
-        echo json_encode([
+    if (
+        $paymentAmount === false ||
+        !is_finite((float)$paymentAmount) ||
+        (float)$paymentAmount <= 0
+    ) {
+        respond(400, [
             'success' => false,
             'message' => 'Payment amount must be greater than zero.'
         ]);
-
-        exit;
     }
 
-    /*
-     * =========================================================
-     * NORMALIZE PAYMENT AMOUNT
-     * =========================================================
-     */
+    $paymentAmount = round((float)$paymentAmount, 2);
 
-    $paymentAmount = round($paymentAmount, 2);
-
-    /*
-     * =========================================================
-     * VALID PAYMENT TYPES
-     * =========================================================
-     */
-
-    $allowedPaymentTypes = [
-        'CASH',
-        'GCASH',
-        'BANK_TRANSFER'
-    ];
+    $allowedPaymentTypes = ['CASH', 'GCASH', 'BANK_TRANSFER'];
 
     if (!in_array($paymentType, $allowedPaymentTypes, true)) {
-
-        http_response_code(400);
-
-        echo json_encode([
+        respond(400, [
             'success' => false,
             'message' => 'Invalid payment method.'
         ]);
-
-        exit;
     }
 
     /*
-     * =========================================================
-     * VALIDATE RECEIVING ACCOUNT
-     * =========================================================
+     * Validate receiving account.
      */
-
-    $accountSql = "
-        SELECT
-            AccID,
-            AccName,
-            AccType
+    $stmt = $db->prepare("
+        SELECT AccID, AccName, AccType
         FROM accounts
         WHERE AccID = :accId
         LIMIT 1
-    ";
-
-    $accountStmt = $db->prepare($accountSql);
-
-    $accountStmt->execute([
-        ':accId' => $accId
-    ]);
-
-    $account = $accountStmt->fetch(PDO::FETCH_ASSOC);
+    ");
+    $stmt->execute([':accId' => $accId]);
+    $account = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$account) {
-
-        http_response_code(403);
-
-        echo json_encode([
+        respond(403, [
             'success' => false,
             'message' => 'Account not found.'
         ]);
-
-        exit;
     }
 
-    /*
-     * =========================================================
-     * ONLY ADMIN AND RIDER MAY RECEIVE PAYMENTS
-     * =========================================================
-     */
-
-    if (
-        $account['AccType'] !== 'ADMIN' &&
-        $account['AccType'] !== 'RIDER'
-    ) {
-
-        http_response_code(403);
-
-        echo json_encode([
+    if (!in_array($account['AccType'], ['ADMIN', 'RIDER'], true)) {
+        respond(403, [
             'success' => false,
-            'message' =>
-                'This account is not authorized to receive payments.'
+            'message' => 'This account is not authorized to receive payments.'
         ]);
-
-        exit;
     }
 
     /*
-     * =========================================================
-     * RECEIPT IMAGE
-     * =========================================================
-     *
-     * CASH:
-     *     receipt image optional.
-     *
-     * GCASH / BANK_TRANSFER:
-     *     receipt image required.
+     * Receipt requirements:
+     * CASH: optional.
+     * GCASH / BANK_TRANSFER: required.
      */
-
     $receiptImage = null;
 
     if ($paymentType !== 'CASH') {
-
         if (
             !isset($_FILES['receiptImage']) ||
             $_FILES['receiptImage']['error'] !== UPLOAD_ERR_OK
         ) {
-
-            http_response_code(400);
-
-            echo json_encode([
+            respond(400, [
                 'success' => false,
-                'message' =>
-                    'Payment receipt photo is required.'
+                'message' => 'Payment receipt photo is required.'
             ]);
-
-            exit;
         }
 
-        if (
-            $_FILES['receiptImage']['size'] >
-            5 * 1024 * 1024
-        ) {
-
-            http_response_code(400);
-
-            echo json_encode([
+        if ($_FILES['receiptImage']['size'] > 5 * 1024 * 1024) {
+            respond(400, [
                 'success' => false,
-                'message' =>
-                    'Receipt image must not exceed 5 MB.'
+                'message' => 'Receipt image must not exceed 5 MB.'
             ]);
-
-            exit;
         }
 
-        $mimeType = mime_content_type(
-            $_FILES['receiptImage']['tmp_name']
-        );
+        $tmpFile = $_FILES['receiptImage']['tmp_name'];
 
+        if (!is_uploaded_file($tmpFile)) {
+            respond(400, [
+                'success' => false,
+                'message' => 'Invalid receipt upload.'
+            ]);
+        }
+
+        $mimeType = mime_content_type($tmpFile);
         $allowedMimeTypes = [
             'image/jpeg',
             'image/png',
             'image/webp'
         ];
 
-        if (!in_array(
-            $mimeType,
-            $allowedMimeTypes,
-            true
-        )) {
-
-            http_response_code(400);
-
-            echo json_encode([
+        if (!in_array($mimeType, $allowedMimeTypes, true)) {
+            respond(400, [
                 'success' => false,
-                'message' => 'Invalid receipt image.'
+                'message' => 'Receipt must be a JPG, PNG, or WEBP image.'
             ]);
-
-            exit;
         }
 
-        $receiptImage = file_get_contents(
-            $_FILES['receiptImage']['tmp_name']
-        );
+        $receiptImage = file_get_contents($tmpFile);
 
         if ($receiptImage === false) {
-
-            http_response_code(500);
-
-            echo json_encode([
+            respond(500, [
                 'success' => false,
-                'message' =>
-                    'Unable to read receipt image.'
+                'message' => 'Unable to read receipt image.'
             ]);
-
-            exit;
         }
     }
-
-    /*
-     * =========================================================
-     * BEGIN TRANSACTION
-     * =========================================================
-     *
-     * The order row is locked so simultaneous payment requests
-     * cannot spend the same outstanding balance.
-     */
 
     $db->beginTransaction();
 
     /*
-     * =========================================================
-     * LOCK AND RETRIEVE ORDER
-     * =========================================================
-     *
-     * IMPORTANT:
-     *
-     * The old implementation calculated:
-     *
-     *     orders.Quantity * orders.UnitPrice
-     *
-     * That only works for single-item orders.
-     *
-     * The current system supports multiple bottle types per order,
-     * so order_items is now the source of truth for the order total.
+     * Lock the order so simultaneous payment requests cannot
+     * both use the same outstanding balance.
      */
-
-    $orderSql = "
+    $stmt = $db->prepare("
         SELECT
-            o.OrderID,
-            o.CustomerID,
-            o.PaymentStatus
-        FROM orders o
-        WHERE o.OrderID = :orderId
+            OrderID,
+            CustomerID,
+            OrderStatus,
+            PaymentStatus
+        FROM orders
+        WHERE OrderID = :orderId
         LIMIT 1
         FOR UPDATE
-    ";
-
-    $orderStmt = $db->prepare($orderSql);
-
-    $orderStmt->execute([
-        ':orderId' => $orderId
-    ]);
-
-    $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
+    ");
+    $stmt->execute([':orderId' => $orderId]);
+    $order = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$order) {
-
-        $db->rollBack();
-
-        http_response_code(404);
-
-        echo json_encode([
+        rollbackIfNeeded($db);
+        respond(404, [
             'success' => false,
             'message' => 'Order not found.'
         ]);
-
-        exit;
     }
 
     /*
-     * =========================================================
-     * GET ORDER TOTAL FROM ORDER ITEMS
-     * =========================================================
-     *
-     * Example:
-     *
-     * 2 × Round Gallon  @ ₱50 = ₱100
-     * 1 × Wilkins Gallon @ ₱60 = ₱60
-     *
-     * Total = ₱160
+     * For riders, require an assigned delivery.
+     * Payment is accepted only after delivery has been closed.
      */
-
-    $totalSql = "
-        SELECT
-            COALESCE(
-                SUM(
-                    oi.Quantity * oi.UnitPrice
-                ),
-                0
-            ) AS TotalAmount
-        FROM order_items oi
-        WHERE oi.OrderID = :orderId
-    ";
-
-    $totalStmt = $db->prepare($totalSql);
-
-    $totalStmt->execute([
-        ':orderId' => $orderId
-    ]);
-
-    $totalResult = $totalStmt->fetch(PDO::FETCH_ASSOC);
-
-    $totalAmount = round(
-        (float) ($totalResult['TotalAmount'] ?? 0),
-        2
-    );
-
-    /*
-     * =========================================================
-     * VERIFY ORDER HAS ITEMS
-     * =========================================================
-     */
-
-    if ($totalAmount <= 0) {
-
-        $db->rollBack();
-
-        http_response_code(400);
-
-        echo json_encode([
-            'success' => false,
-            'message' =>
-                'This order has no valid order items or has a zero total amount.',
-            'data' => [
-                'orderId' => $orderId,
-                'totalAmount' => $totalAmount
-            ]
-        ]);
-
-        exit;
-    }
-
-    /*
-     * =========================================================
-     * RIDER AUTHORIZATION
-     * =========================================================
-     *
-     * A rider must have a delivery assignment for this order.
-     */
-
     if ($account['AccType'] === 'RIDER') {
-
-        $deliverySql = "
-            SELECT
-                DeliveryID,
-                DeliveryStatus
+        $stmt = $db->prepare("
+            SELECT DeliveryID, DeliveryStatus
             FROM delivery
             WHERE OrderID = :orderId
               AND AccID = :accId
             LIMIT 1
-        ";
-
-        $deliveryStmt = $db->prepare($deliverySql);
-
-        $deliveryStmt->execute([
+            FOR UPDATE
+        ");
+        $stmt->execute([
             ':orderId' => $orderId,
             ':accId' => $accId
         ]);
-
-        $delivery = $deliveryStmt->fetch(PDO::FETCH_ASSOC);
+        $delivery = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$delivery) {
-
-            $db->rollBack();
-
-            http_response_code(403);
-
-            echo json_encode([
+            rollbackIfNeeded($db);
+            respond(403, [
                 'success' => false,
-                'message' =>
-                    'This order is not assigned to this rider.'
+                'message' => 'This order is not assigned to this rider.'
             ]);
+        }
 
-            exit;
+        if (!in_array(
+            $delivery['DeliveryStatus'],
+            ['DELIVERED', 'INCOMPLETE'],
+            true
+        )) {
+            rollbackIfNeeded($db);
+            respond(400, [
+                'success' => false,
+                'message' => 'Complete and close the delivery before recording payment.'
+            ]);
         }
     }
 
     /*
-     * =========================================================
-     * CALCULATE PREVIOUS PAYMENTS
-     * =========================================================
-     *
-     * Only payments linked through order_payment_transaction
-     * are counted toward this order.
+     * Load order items and their quantity limits.
+     * UnitPrice is the price to use for each delivered bottle.
      */
-
-    $paidSql = "
+    $stmt = $db->prepare("
         SELECT
-            COALESCE(
-                SUM(opt.Amount),
-                0
-            ) AS PaidAmount
-        FROM order_payment_transaction opt
-
-        INNER JOIN payments p
-            ON opt.PaymentID = p.PaymentID
-
-        WHERE opt.OrderID = :orderId
-    ";
-
-    $paidStmt = $db->prepare($paidSql);
-
-    $paidStmt->execute([
-        ':orderId' => $orderId
-    ]);
-
-    $paid = $paidStmt->fetch(PDO::FETCH_ASSOC);
-
-    $alreadyPaid = round(
-        (float) ($paid['PaidAmount'] ?? 0),
-        2
-    );
+            OrderItemID,
+            BottleTypeID,
+            Quantity,
+            UnitPrice
+        FROM order_items
+        WHERE OrderID = :orderId
+        ORDER BY OrderItemID ASC
+        FOR UPDATE
+    ");
+    $stmt->execute([':orderId' => $orderId]);
+    $orderItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     /*
-     * =========================================================
-     * CALCULATE OUTSTANDING BALANCE
-     * =========================================================
+     * Support legacy orders that have no order_items rows.
+     * The orders table has one BottleTypeID, Quantity, and UnitPrice.
      */
+    if (!$orderItems) {
+        $stmt = $db->prepare("
+            SELECT BottleTypeID, Quantity, UnitPrice
+            FROM orders
+            WHERE OrderID = :orderId
+            LIMIT 1
+        ");
+        $stmt->execute([':orderId' => $orderId]);
+        $legacyItem = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $outstanding = round(
-        $totalAmount - $alreadyPaid,
-        2
-    );
+        if (!$legacyItem) {
+            rollbackIfNeeded($db);
+            respond(400, [
+                'success' => false,
+                'message' => 'No order items were found.'
+            ]);
+        }
+
+        $orderItems = [[
+            'OrderItemID' => null,
+            'BottleTypeID' => $legacyItem['BottleTypeID'],
+            'Quantity' => $legacyItem['Quantity'],
+            'UnitPrice' => $legacyItem['UnitPrice']
+        ]];
+    }
 
     /*
-     * =========================================================
-     * PREVENT OVERPAID ORDER
-     * =========================================================
+     * Build item allocation counters.
      */
+    $itemsById = [];
+    $itemsByType = [];
 
-    if ($outstanding <= 0) {
+    foreach ($orderItems as $index => $item) {
+        $item['OrderItemID'] = $item['OrderItemID'] === null
+            ? null
+            : (int)$item['OrderItemID'];
+        $item['BottleTypeID'] = (int)$item['BottleTypeID'];
+        $item['Quantity'] = (int)$item['Quantity'];
+        $item['UnitPrice'] = round((float)$item['UnitPrice'], 2);
+        $item['DeliveredCount'] = 0;
 
-        $db->rollBack();
+        $orderItems[$index] = $item;
 
-        http_response_code(400);
+        if ($item['OrderItemID'] !== null) {
+            $itemsById[$item['OrderItemID']] = $index;
+        }
 
-        echo json_encode([
+        $itemsByType[$item['BottleTypeID']][] = $index;
+    }
+
+    /*
+     * Read actual delivery records and match each bottle to its
+     * order item. A NULL OrderItemID can be matched by bottle type,
+     * but only while that item's ordered quantity has capacity.
+     */
+    $stmt = $db->prepare("
+        SELECT
+            odt.ODTID,
+            odt.OrderID,
+            odt.OrderItemID,
+            odt.DeliveryID,
+            odt.BottleID,
+            b.BottleTypeID
+        FROM order_delivery_transaction odt
+        INNER JOIN bottles b
+            ON b.BottleID = odt.BottleID
+        WHERE odt.OrderID = :orderId
+        ORDER BY odt.ODTID ASC
+        FOR UPDATE
+    ");
+    $stmt->execute([':orderId' => $orderId]);
+    $deliveredRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $deliveredQuantity = 0;
+    $deliveredAmount = 0.00;
+    $unmatchedBottles = [];
+
+    foreach ($deliveredRows as $row) {
+        $bottleTypeId = (int)$row['BottleTypeID'];
+        $itemIndex = null;
+
+        if ($row['OrderItemID'] !== null) {
+            $itemId = (int)$row['OrderItemID'];
+
+            if (!isset($itemsById[$itemId])) {
+                $unmatchedBottles[] = (int)$row['BottleID'];
+                continue;
+            }
+
+            $itemIndex = $itemsById[$itemId];
+
+            if (
+                $orderItems[$itemIndex]['BottleTypeID'] !== $bottleTypeId ||
+                $orderItems[$itemIndex]['DeliveredCount'] >=
+                    $orderItems[$itemIndex]['Quantity']
+            ) {
+                $unmatchedBottles[] = (int)$row['BottleID'];
+                continue;
+            }
+        } else {
+            if (!isset($itemsByType[$bottleTypeId])) {
+                $unmatchedBottles[] = (int)$row['BottleID'];
+                continue;
+            }
+
+            foreach ($itemsByType[$bottleTypeId] as $candidateIndex) {
+                if (
+                    $orderItems[$candidateIndex]['DeliveredCount'] <
+                    $orderItems[$candidateIndex]['Quantity']
+                ) {
+                    $itemIndex = $candidateIndex;
+                    break;
+                }
+            }
+
+            if ($itemIndex === null) {
+                $unmatchedBottles[] = (int)$row['BottleID'];
+                continue;
+            }
+        }
+
+        $orderItems[$itemIndex]['DeliveredCount']++;
+        $deliveredQuantity++;
+        $deliveredAmount += $orderItems[$itemIndex]['UnitPrice'];
+    }
+
+    if ($unmatchedBottles) {
+        rollbackIfNeeded($db);
+        respond(409, [
             'success' => false,
-            'message' => 'This order is already fully paid.',
+            'message' =>
+                'Some delivered bottles cannot be matched safely to the order items. Correct the delivery records before taking payment.',
             'data' => [
-                'totalAmount' => $totalAmount,
+                'orderId' => $orderId,
+                'unmatchedBottleIds' => $unmatchedBottles
+            ]
+        ]);
+    }
+
+    $deliveredAmount = round($deliveredAmount, 2);
+
+    if ($deliveredQuantity <= 0 || $deliveredAmount <= 0) {
+        rollbackIfNeeded($db);
+        respond(400, [
+            'success' => false,
+            'message' => 'No delivered bottles with a valid amount were found for this order.',
+            'data' => [
+                'orderId' => $orderId,
+                'deliveredQuantity' => $deliveredQuantity,
+                'deliveredAmount' => $deliveredAmount
+            ]
+        ]);
+    }
+
+    /*
+     * Sum payments already allocated to this order.
+     * Use transaction Amount, not PaymentAmount, because a
+     * payment can be allocated across multiple orders.
+     */
+    $stmt = $db->prepare("
+        SELECT COALESCE(SUM(Amount), 0) AS PaidAmount
+        FROM order_payment_transaction
+        WHERE OrderID = :orderId
+        FOR UPDATE
+    ");
+    $stmt->execute([':orderId' => $orderId]);
+    $alreadyPaid = round(
+        (float)$stmt->fetchColumn(),
+        2
+    );
+
+    $outstanding = round($deliveredAmount - $alreadyPaid, 2);
+
+    if ($outstanding <= 0.00) {
+        /*
+         * Do not create another payment when the delivered
+         * value is already covered by recorded payments.
+         */
+        $db->commit();
+
+        respond(409, [
+            'success' => false,
+            'message' =>
+                'This order has no outstanding balance for the delivered bottles.',
+            'data' => [
+                'orderId' => $orderId,
+                'deliveredQuantity' => $deliveredQuantity,
+                'totalAmount' => $deliveredAmount,
                 'paidAmount' => $alreadyPaid,
                 'outstandingAmount' => 0,
                 'paymentStatus' => 'PAID'
             ]
         ]);
-
-        exit;
     }
-
-    /*
-     * =========================================================
-     * PREVENT PAYMENT FROM EXCEEDING BALANCE
-     * =========================================================
-     */
 
     if ($paymentAmount > $outstanding) {
-
-        $db->rollBack();
-
-        http_response_code(400);
-
-        echo json_encode([
+        rollbackIfNeeded($db);
+        respond(400, [
             'success' => false,
-            'message' =>
-                'Payment exceeds the outstanding balance.',
+            'message' => 'Payment exceeds the outstanding balance.',
             'data' => [
-                'totalAmount' => $totalAmount,
+                'totalAmount' => $deliveredAmount,
+                'deliveredQuantity' => $deliveredQuantity,
                 'paidAmount' => $alreadyPaid,
                 'outstandingAmount' => $outstanding,
-                'paymentStatus' =>
-                    $alreadyPaid > 0
-                        ? 'PARTIALLY_PAID'
-                        : 'UNPAID'
+                'paymentStatus' => $alreadyPaid > 0
+                    ? 'PARTIALLY_PAID'
+                    : 'UNPAID'
             ]
         ]);
-
-        exit;
     }
 
     /*
-     * =========================================================
-     * CREATE PAYMENT
-     * =========================================================
+     * Insert payment record.
      */
-
-    $paymentSql = "
-        INSERT INTO payments
-        (
+    $stmt = $db->prepare("
+        INSERT INTO payments (
             CustomerID,
             AccID,
             PaymentAmount,
@@ -540,9 +465,7 @@ try {
             PaymentDateTime,
             ReceiptImage,
             Notes
-        )
-        VALUES
-        (
+        ) VALUES (
             :customerId,
             :accId,
             :paymentAmount,
@@ -551,220 +474,111 @@ try {
             :receiptImage,
             :notes
         )
-    ";
+    ");
 
-    $paymentStmt = $db->prepare($paymentSql);
-
-    $paymentStmt->bindValue(
-        ':customerId',
-        (int) $order['CustomerID'],
-        PDO::PARAM_INT
-    );
-
-    $paymentStmt->bindValue(
-        ':accId',
-        $accId,
-        PDO::PARAM_INT
-    );
-
-    $paymentStmt->bindValue(
-        ':paymentAmount',
-        $paymentAmount
-    );
-
-    $paymentStmt->bindValue(
-        ':paymentType',
-        $paymentType
-    );
+    $stmt->bindValue(':customerId', (int)$order['CustomerID'], PDO::PARAM_INT);
+    $stmt->bindValue(':accId', $accId, PDO::PARAM_INT);
+    $stmt->bindValue(':paymentAmount', $paymentAmount);
+    $stmt->bindValue(':paymentType', $paymentType);
 
     if ($receiptImage === null) {
-
-        $paymentStmt->bindValue(
-            ':receiptImage',
-            null,
-            PDO::PARAM_NULL
-        );
-
+        $stmt->bindValue(':receiptImage', null, PDO::PARAM_NULL);
     } else {
-
-        $paymentStmt->bindValue(
-            ':receiptImage',
-            $receiptImage,
-            PDO::PARAM_LOB
-        );
+        $stmt->bindValue(':receiptImage', $receiptImage, PDO::PARAM_LOB);
     }
 
-    if ($notes === '') {
+    $stmt->bindValue(
+        ':notes',
+        $notes === '' ? null : $notes,
+        $notes === '' ? PDO::PARAM_NULL : PDO::PARAM_STR
+    );
 
-        $paymentStmt->bindValue(
-            ':notes',
-            null,
-            PDO::PARAM_NULL
-        );
-
-    } else {
-
-        $paymentStmt->bindValue(
-            ':notes',
-            $notes
-        );
-    }
-
-    $paymentStmt->execute();
-
-    $paymentId = (int) $db->lastInsertId();
+    $stmt->execute();
+    $paymentId = (int)$db->lastInsertId();
 
     /*
-     * =========================================================
-     * LINK PAYMENT TO ORDER
-     * =========================================================
+     * Link the payment to the order.
      */
-
-    $transactionSql = "
-        INSERT INTO order_payment_transaction
-        (
+    $stmt = $db->prepare("
+        INSERT INTO order_payment_transaction (
             OrderID,
             PaymentID,
             Amount
-        )
-        VALUES
-        (
+        ) VALUES (
             :orderId,
             :paymentId,
             :amount
         )
-    ";
+    ");
 
-    $transactionStmt = $db->prepare(
-        $transactionSql
-    );
-
-    $transactionStmt->execute([
+    $stmt->execute([
         ':orderId' => $orderId,
         ':paymentId' => $paymentId,
         ':amount' => $paymentAmount
     ]);
 
     /*
-     * =========================================================
-     * CALCULATE NEW PAYMENT TOTAL
-     * =========================================================
+     * Update payment status based on the delivered value.
+     * Do not change OrderStatus: INCOMPLETE must remain INCOMPLETE.
      */
+    $newPaidAmount = round($alreadyPaid + $paymentAmount, 2);
+    $newOutstanding = round($deliveredAmount - $newPaidAmount, 2);
 
-    $newPaidAmount = round(
-        $alreadyPaid + $paymentAmount,
-        2
-    );
+    $paymentStatus = $newOutstanding <= 0.00
+        ? 'PAID'
+        : 'PARTIALLY_PAID';
 
-    $newOutstanding = round(
-        $totalAmount - $newPaidAmount,
-        2
-    );
-
-    /*
-     * =========================================================
-     * DETERMINE NEW PAYMENT STATUS
-     * =========================================================
-     */
-
-    if ($newOutstanding <= 0.01) {
-
-        $newOutstanding = 0;
-
-        $paymentStatus = 'PAID';
-
-    } else {
-
-        $paymentStatus = 'PARTIALLY_PAID';
-    }
-
-    /*
-     * =========================================================
-     * UPDATE ORDER PAYMENT STATUS
-     * =========================================================
-     */
-
-    $updateOrderSql = "
+    $stmt = $db->prepare("
         UPDATE orders
         SET PaymentStatus = :paymentStatus
         WHERE OrderID = :orderId
-    ";
+    ");
 
-    $updateOrderStmt = $db->prepare(
-        $updateOrderSql
-    );
-
-    $updateOrderStmt->execute([
+    $stmt->execute([
         ':paymentStatus' => $paymentStatus,
         ':orderId' => $orderId
     ]);
 
-    /*
-     * =========================================================
-     * COMMIT
-     * =========================================================
-     */
-
     $db->commit();
 
-    /*
-     * =========================================================
-     * SUCCESS RESPONSE
-     * =========================================================
-     */
-
-    echo json_encode([
+    respond(200, [
         'success' => true,
         'message' => 'Payment recorded successfully.',
         'data' => [
             'paymentId' => $paymentId,
             'orderId' => $orderId,
-
-            'totalAmount' => $totalAmount,
-
+            'deliveredQuantity' => $deliveredQuantity,
+            'totalAmount' => $deliveredAmount,
             'paidAmount' => $newPaidAmount,
-
-            'outstandingAmount' => $newOutstanding,
-
+            'outstandingAmount' => max(0, $newOutstanding),
             'paymentStatus' => $paymentStatus,
-
             'receivedByAccId' => $accId,
-
             'receivedByType' => $account['AccType']
         ]
     ]);
 
 } catch (PDOException $e) {
+    rollbackIfNeeded($db);
 
-    if (
-        $db !== null &&
-        $db->inTransaction()
-    ) {
-        $db->rollBack();
-    }
+    error_log(
+        'Syawla create_payment.php database error: ' .
+        $e->getMessage()
+    );
 
-    http_response_code(500);
-
-    echo json_encode([
+    respond(500, [
         'success' => false,
-        'message' => 'Database error.'
+        'message' => 'Database error while processing payment.'
     ]);
 
 } catch (Throwable $e) {
+    rollbackIfNeeded($db);
 
-    if (
-        $db !== null &&
-        $db->inTransaction()
-    ) {
-        $db->rollBack();
-    }
+    error_log(
+        'Syawla create_payment.php error: ' . $e->getMessage()
+    );
 
-    http_response_code(500);
-
-    echo json_encode([
+    respond(500, [
         'success' => false,
         'message' => 'Unable to process payment.'
     ]);
 }
-?>
-

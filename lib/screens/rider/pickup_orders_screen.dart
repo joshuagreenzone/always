@@ -22,7 +22,6 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
   final RiderService _riderService = RiderService();
 
   List<PickupOrder> _orders = [];
-
   bool _isLoading = true;
   String? _error;
 
@@ -33,10 +32,12 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
   }
 
   Future<void> _loadOrders() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
 
     try {
       final orders = await _riderService.getPickupOrders(widget.account.accId);
@@ -66,7 +67,6 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
     );
 
     if (!mounted) return;
-
     await _loadOrders();
   }
 
@@ -101,17 +101,10 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.error_outline_rounded,
-                  size: 48,
-                  color: AppColors.error,
-                ),
+              const Icon(
+                Icons.error_outline_rounded,
+                size: 48,
+                color: AppColors.error,
               ),
               const SizedBox(height: AppSpacing.md),
               Text(
@@ -120,31 +113,10 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
                 style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
               ),
               const SizedBox(height: AppSpacing.lg),
-              SizedBox(
-                width: 180,
-                height: 44,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0284C7),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  onPressed: _loadOrders,
-                  icon: const Icon(
-                    Icons.refresh_rounded,
-                    size: 18,
-                    color: Colors.white,
-                  ),
-                  label: const Text(
-                    'RETRY',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.5,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
+              ElevatedButton.icon(
+                onPressed: _loadOrders,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('RETRY'),
               ),
             ],
           ),
@@ -154,28 +126,18 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
 
     if (_orders.isEmpty) {
       return RefreshIndicator(
-        color: const Color(0xFF0284C7),
         onRefresh: _loadOrders,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          children: [
-            const SizedBox(height: 120),
-            Center(
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFD97706).withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.assignment_return_rounded,
-                  size: 56,
-                  color: Color(0xFFD97706),
-                ),
-              ),
+          children: const [
+            SizedBox(height: 120),
+            Icon(
+              Icons.assignment_return_rounded,
+              size: 56,
+              color: Color(0xFFD97706),
             ),
-            const SizedBox(height: AppSpacing.md),
-            const Center(
+            SizedBox(height: AppSpacing.md),
+            Center(
               child: Text(
                 'No Pending Pickups',
                 style: TextStyle(
@@ -185,13 +147,14 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 6),
-            const Padding(
+            SizedBox(height: 6),
+            Padding(
               padding: EdgeInsets.symmetric(horizontal: AppSpacing.xl),
               child: Text(
-                'Orders awaiting empty bottle pickups will appear here.',
-                style: TextStyle(fontSize: 14, color: Color(0xFF64748B)),
+                'Deliveries with empty bottles awaiting collection '
+                'will appear here.',
                 textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: Color(0xFF64748B)),
               ),
             ),
           ],
@@ -200,7 +163,6 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
     }
 
     return RefreshIndicator(
-      color: const Color(0xFF0284C7),
       onRefresh: _loadOrders,
       child: ListView.separated(
         padding: const EdgeInsets.all(AppSizes.screenPadding),
@@ -208,7 +170,9 @@ class _PickupOrdersScreenState extends State<PickupOrdersScreen> {
         separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
         itemBuilder: (_, index) {
           final order = _orders[index];
+
           return _PickupOrderCard(
+            key: ValueKey(order.deliveryId),
             order: order,
             onScanTap: () => _openPickup(order),
           );
@@ -222,30 +186,39 @@ class _PickupOrderCard extends StatelessWidget {
   final PickupOrder order;
   final VoidCallback onScanTap;
 
-  const _PickupOrderCard({required this.order, required this.onScanTap});
+  const _PickupOrderCard({
+    super.key,
+    required this.order,
+    required this.onScanTap,
+  });
 
-  // Maps bottle types (Square, Round, Wilkins) to water styles
   _BottleStyle _getBottleStyle(String type) {
     final lower = type.toLowerCase();
+
     if (lower.contains('square')) {
       return const _BottleStyle(
         color: Color(0xFF0284C7),
         bgColor: Color(0xFFE0F2FE),
         icon: Icons.crop_square_rounded,
       );
-    } else if (lower.contains('round')) {
+    }
+
+    if (lower.contains('round')) {
       return const _BottleStyle(
         color: Color(0xFF059669),
         bgColor: Color(0xFFD1FAE5),
         icon: Icons.trip_origin_rounded,
       );
-    } else if (lower.contains('wilkins')) {
+    }
+
+    if (lower.contains('wilkins')) {
       return const _BottleStyle(
         color: Color(0xFF0D9488),
         bgColor: Color(0xFFCCFBF1),
         icon: Icons.water_drop_rounded,
       );
     }
+
     return const _BottleStyle(
       color: Color(0xFF2563EB),
       bgColor: Color(0xFFDBEAFE),
@@ -255,30 +228,27 @@ class _PickupOrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bottleStyle = _getBottleStyle(order.bottleType);
-    const accentAmber = Color(0xFFD97706);
+    const amber = Color(0xFFD97706);
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accentAmber.withOpacity(0.3), width: 1.2),
+        border: Border.all(color: amber.withOpacity(0.3), width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: accentAmber.withOpacity(0.08),
+            color: amber.withOpacity(0.08),
             blurRadius: 14,
             offset: const Offset(0, 5),
           ),
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header Row: Customer Name & Order ID Tag
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
                   child: Column(
@@ -286,29 +256,29 @@ class _PickupOrderCard extends StatelessWidget {
                     children: [
                       Text(
                         order.customerName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                           color: Color(0xFF0F172A),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 2),
-                      Row(
+                      const SizedBox(height: 4),
+                      const Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.assignment_return_rounded,
-                            size: 13,
-                            color: accentAmber,
+                            size: 14,
+                            color: amber,
                           ),
-                          const SizedBox(width: 4),
-                          const Text(
+                          SizedBox(width: 4),
+                          Text(
                             'Bottle Pickup',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: accentAmber,
+                              color: amber,
                             ),
                           ),
                         ],
@@ -316,12 +286,11 @@ class _PickupOrderCard extends StatelessWidget {
                     ],
                   ),
                 ),
-
-                // Order Number Badge
+                const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
-                    vertical: 4,
+                    vertical: 6,
                   ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF1F5F9),
@@ -343,92 +312,115 @@ class _PickupOrderCard extends StatelessWidget {
             const Divider(height: 1, color: Color(0xFFE2E8F0)),
             const SizedBox(height: 12),
 
-            // Middle Row: Bottle Type Badge & Target Quantity
-            Row(
-              children: [
-                // Bottle Type Badge
-                Container(
+            _InfoRow(
+              icon: Icons.local_shipping_outlined,
+              label: 'Delivery #${order.deliveryId}',
+            ),
+            const SizedBox(height: 6),
+            _InfoRow(
+              icon: Icons.calendar_today_outlined,
+              label: _formatDate(order.deliveryDateTime),
+            ),
+            const SizedBox(height: 6),
+            _InfoRow(icon: Icons.info_outline, label: order.deliveryStatus),
+
+            const SizedBox(height: 16),
+
+            const Text(
+              'EMPTY BOTTLES TO COLLECT',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.6,
+                color: Color(0xFF64748B),
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            ...order.bottleTypes.map((type) {
+              final style = _getBottleStyle(type.bottleType);
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
+                    horizontal: 12,
+                    vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: bottleStyle.bgColor,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: bottleStyle.color.withOpacity(0.3),
-                      width: 1,
-                    ),
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
                   child: Row(
-                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        bottleStyle.icon,
-                        size: 14,
-                        color: bottleStyle.color,
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: style.bgColor,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(style.icon, color: style.color, size: 19),
                       ),
-                      const SizedBox(width: 5),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          type.bottleType,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF334155),
+                          ),
+                        ),
+                      ),
                       Text(
-                        order.bottleType.toUpperCase(),
+                        '${type.remainingBottleCount} left',
                         style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: bottleStyle.color,
-                          letterSpacing: 0.5,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: style.color,
                         ),
                       ),
                     ],
                   ),
                 ),
+              );
+            }),
 
-                const SizedBox(width: 8),
+            const SizedBox(height: 4),
 
-                Text(
-                  '× ${order.quantity} Total',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF334155),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            // Pickup Progress Stats Grid
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
+                color: const Color(0xFFFFFBEB),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
+                border: Border.all(color: const Color(0xFFFDE68A)),
               ),
               child: Row(
                 children: [
-                  Expanded(
-                    child: _CounterStat(
-                      label: 'DELIVERED',
-                      count: order.deliveredBottleCount,
-                      icon: Icons.local_shipping_rounded,
-                      iconColor: const Color(0xFF0284C7),
+                  const Icon(
+                    Icons.inventory_2_outlined,
+                    color: amber,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Total remaining pickup',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF92400E),
+                      ),
                     ),
                   ),
-                  Container(
-                    height: 28,
-                    width: 1,
-                    color: const Color(0xFFCBD5E1),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 12.0),
-                      child: _CounterStat(
-                        label: 'PICKED UP',
-                        count: order.pickedUpBottleCount,
-                        icon: Icons.qr_code_scanner_rounded,
-                        iconColor: const Color(0xFF10B981),
-                      ),
+                  Text(
+                    '${order.remainingBottleCount}',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFF92400E),
                     ),
                   ),
                 ],
@@ -437,13 +429,12 @@ class _PickupOrderCard extends StatelessWidget {
 
             const SizedBox(height: 14),
 
-            // Scan Action Button
             SizedBox(
               width: double.infinity,
               height: 46,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: accentAmber,
+                  backgroundColor: amber,
                   elevation: 0,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -470,55 +461,33 @@ class _PickupOrderCard extends StatelessWidget {
       ),
     );
   }
+
+  String _formatDate(DateTime date) {
+    final local = date.toLocal();
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+
+    return '$month/$day/${local.year}';
+  }
 }
 
-class _CounterStat extends StatelessWidget {
-  final String label;
-  final int count;
+class _InfoRow extends StatelessWidget {
   final IconData icon;
-  final Color iconColor;
+  final String label;
 
-  const _CounterStat({
-    required this.label,
-    required this.count,
-    required this.icon,
-    required this.iconColor,
-  });
+  const _InfoRow({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: iconColor.withOpacity(0.1),
-            shape: BoxShape.circle,
+        Icon(icon, size: 15, color: const Color(0xFF64748B)),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
           ),
-          child: Icon(icon, size: 16, color: iconColor),
-        ),
-        const SizedBox(width: 8),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF94A3B8),
-                letterSpacing: 0.5,
-              ),
-            ),
-            Text(
-              '$count Bottles',
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF0F172A),
-              ),
-            ),
-          ],
         ),
       ],
     );

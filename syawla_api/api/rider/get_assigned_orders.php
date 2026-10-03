@@ -1,3 +1,4 @@
+
 <?php
 
 header('Content-Type: application/json');
@@ -5,7 +6,6 @@ header('Content-Type: application/json');
 require_once '../../config/database.php';
 
 try {
-
     $database = new Database();
     $db = $database->connect();
 
@@ -25,36 +25,30 @@ try {
     }
 
     /*
-     * =========================================================
      * GET ASSIGNED ORDERS
-     * =========================================================
+     *
+     * Exclude orders marked INCOMPLETE.
+     * Only deliveries assigned to this rider are returned.
      */
-
     $sql = "
         SELECT
             o.OrderID,
             o.CustomerID,
             c.CustomerName,
-
             o.OrderDateTime,
             o.OrderStatus,
             o.PaymentStatus,
-
             d.DeliveryID,
             d.DeliveryDateTime,
             d.DeliveryStatus
-
         FROM delivery d
-
         INNER JOIN orders o
             ON d.OrderID = o.OrderID
-
         INNER JOIN customers c
             ON o.CustomerID = c.CustomerID
-
         WHERE d.AccID = :accId
           AND d.DeliveryStatus = 'ASSIGNED'
-
+          AND o.OrderStatus <> 'INCOMPLETE'
         ORDER BY d.DeliveryDateTime ASC
     ";
 
@@ -67,11 +61,8 @@ try {
     $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     /*
-     * =========================================================
      * GET ITEMS FOR EACH ORDER
-     * =========================================================
      */
-
     $itemSql = "
         SELECT
             oi.OrderItemID,
@@ -80,98 +71,62 @@ try {
             bt.BottleType,
             oi.Quantity,
             oi.UnitPrice,
-
             (oi.Quantity * oi.UnitPrice) AS ItemTotal
-
         FROM order_items oi
-
         INNER JOIN bottle_types bt
             ON oi.BottleTypeID = bt.BottleTypeID
-
         WHERE oi.OrderID = :orderId
-
         ORDER BY oi.OrderItemID ASC
     ";
 
     $itemStmt = $db->prepare($itemSql);
 
     foreach ($orders as &$order) {
-
-        $orderId =
-            (int) $order['OrderID'];
+        $orderId = (int) $order['OrderID'];
 
         $itemStmt->execute([
             ':orderId' => $orderId
         ]);
 
-        $items =
-            $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+        $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
 
         $totalQuantity = 0;
         $totalAmount = 0;
 
         foreach ($items as &$item) {
+            $item['OrderItemID'] = (int) $item['OrderItemID'];
+            $item['OrderID'] = (int) $item['OrderID'];
+            $item['BottleTypeID'] = (int) $item['BottleTypeID'];
+            $item['Quantity'] = (int) $item['Quantity'];
+            $item['UnitPrice'] = (float) $item['UnitPrice'];
+            $item['ItemTotal'] = (float) $item['ItemTotal'];
 
-            $item['OrderItemID'] =
-                (int) $item['OrderItemID'];
-
-            $item['OrderID'] =
-                (int) $item['OrderID'];
-
-            $item['BottleTypeID'] =
-                (int) $item['BottleTypeID'];
-
-            $item['Quantity'] =
-                (int) $item['Quantity'];
-
-            $item['UnitPrice'] =
-                (float) $item['UnitPrice'];
-
-            $item['ItemTotal'] =
-                (float) $item['ItemTotal'];
-
-            $totalQuantity +=
-                $item['Quantity'];
-
-            $totalAmount +=
-                $item['ItemTotal'];
+            $totalQuantity += $item['Quantity'];
+            $totalAmount += $item['ItemTotal'];
         }
 
         unset($item);
 
-        $order['OrderID'] =
-            $orderId;
-
-        $order['CustomerID'] =
-            (int) $order['CustomerID'];
-
-        $order['DeliveryID'] =
-            (int) $order['DeliveryID'];
-
-        $order['TotalQuantity'] =
-            $totalQuantity;
-
-        $order['TotalAmount'] =
-            $totalAmount;
-
-        $order['items'] =
-            $items;
+        $order['OrderID'] = $orderId;
+        $order['CustomerID'] = (int) $order['CustomerID'];
+        $order['DeliveryID'] = (int) $order['DeliveryID'];
+        $order['TotalQuantity'] = $totalQuantity;
+        $order['TotalAmount'] = $totalAmount;
+        $order['items'] = $items;
     }
 
     unset($order);
 
     /*
-     * =========================================================
      * RESPONSE
-     * =========================================================
      */
-
     echo json_encode([
         'success' => true,
         'data' => $orders
     ]);
 
 } catch (PDOException $e) {
+    error_log('Get assigned orders error: ' . $e->getMessage());
 
     http_response_code(500);
 
@@ -180,3 +135,4 @@ try {
         'message' => 'Database error.'
     ]);
 }
+?>

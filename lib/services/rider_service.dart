@@ -10,6 +10,10 @@ import 'api_service.dart';
 class RiderService {
   final ApiService _apiService = ApiService();
 
+  // ============================================================
+  // ASSIGNED ORDERS
+  // ============================================================
+
   Future<List<AssignedOrder>> getAssignedOrders(int accId) async {
     try {
       final response = await _apiService.dio.get(
@@ -35,6 +39,10 @@ class RiderService {
       throw Exception(_getDioMessage(e));
     }
   }
+
+  // ============================================================
+  // ORDER DETAILS
+  // ============================================================
 
   Future<OrderDetails> getOrderDetails({
     required int orderId,
@@ -69,17 +77,12 @@ class RiderService {
   // SCAN DELIVERY BOTTLE
   // ============================================================
   //
-  // IMPORTANT:
-  // This function is kept for compatibility with the existing
-  // project, but the new DeliveryScanScreen should NOT call it.
+  // Kept for compatibility with existing project code.
   //
-  // The new delivery scanning flow stores scanned bottles only
-  // in temporary Flutter memory. The bottles are sent to the
-  // server together through completeDelivery() only after the
-  // rider confirms the delivery.
-  //
-  // Calling this function during scanning will immediately save
-  // the bottle into the database, which defeats the new flow.
+  // The temporary delivery scanning flow should not call this
+  // method because it saves a scan immediately on the server.
+  // Instead, collect bottle numbers and GPS data in memory and
+  // submit them together through completeDelivery().
   //
 
   Future<Map<String, dynamic>> scanDeliveryBottle({
@@ -119,9 +122,7 @@ class RiderService {
         throw Exception(responseData['message'].toString());
       }
 
-      if (e.type == DioExceptionType.connectionTimeout ||
-          e.type == DioExceptionType.receiveTimeout ||
-          e.type == DioExceptionType.connectionError) {
+      if (_isConnectionError(e)) {
         throw Exception('Unable to connect to the server.');
       }
 
@@ -182,9 +183,7 @@ class RiderService {
         throw Exception(e.response?.data['message'].toString());
       }
 
-      if (e.type == DioExceptionType.connectionTimeout ||
-          e.type == DioExceptionType.receiveTimeout ||
-          e.type == DioExceptionType.connectionError) {
+      if (_isConnectionError(e)) {
         throw Exception('Unable to connect to the server.');
       }
 
@@ -196,27 +195,20 @@ class RiderService {
   // COMPLETE DELIVERY
   // ============================================================
   //
-  // NEW DELIVERY FLOW:
+  // The rider scans bottles and temporarily stores the results
+  // in Flutter memory.
   //
-  // 1. Rider scans bottles.
-  // 2. DeliveryScanScreen keeps the scans temporarily in memory.
-  // 3. Nothing is inserted into the database during scanning.
-  // 4. Rider proceeds to DeliveryConfirmationScreen.
-  // 5. After the rider confirms, this function sends ALL scanned
-  //    bottles to complete_delivery.php in one request.
-  // 6. The PHP endpoint validates every bottle and, inside one
-  //    database transaction:
+  // On confirmation, this method submits all scanned bottles in
+  // one request. The PHP endpoint must validate the bottles and
+  // commit the delivery records inside a database transaction.
   //
-  //       - inserts order_delivery_transaction records
-  //       - inserts bottle_scan_event records
-  //       - marks the delivery as DELIVERED
-  //       - marks the order as DELIVERED
+  // For partial deliveries:
+  // - incompleteReason is required.
+  // - Only scanned and validated bottles are recorded as delivered.
+  // - The delivery is marked INCOMPLETE.
+  // - Undelivered bottles are not automatically rescheduled.
   //
-  // 7. If any bottle fails validation, the server rolls back
-  //    the entire transaction.
-  //
-  // The bottles parameter should contain objects like:
-  //
+  // Example bottle:
   // {
   //   "bottleNumber": "BTL001",
   //   "latitude": 13.12345678,
@@ -224,16 +216,24 @@ class RiderService {
   //   "accuracy": 8.5
   // }
   //
-  // This means GPS information collected during scanning is
-  // preserved until the final delivery confirmation.
-  //
 
   Future<Map<String, dynamic>> completeDelivery({
     required int accId,
     required int orderId,
     required int deliveryId,
     required List<Map<String, dynamic>> bottles,
+    String? incompleteReason,
   }) async {
+    final String reason = incompleteReason?.trim() ?? '';
+
+    if (bottles.isEmpty) {
+      throw Exception('Scan at least one bottle before confirming delivery.');
+    }
+
+    if (reason.isEmpty && incompleteReason != null) {
+      throw Exception('Please provide a reason for the incomplete delivery.');
+    }
+
     try {
       final response = await _apiService.dio.post(
         'api/rider/complete_delivery.php',
@@ -242,6 +242,7 @@ class RiderService {
           'orderId': orderId,
           'deliveryId': deliveryId,
           'bottles': bottles,
+          'incompleteReason': reason.isEmpty ? null : reason,
         },
       );
 
@@ -260,32 +261,12 @@ class RiderService {
         throw Exception(e.response?.data['message'].toString());
       }
 
-      if (e.type == DioExceptionType.connectionTimeout ||
-          e.type == DioExceptionType.receiveTimeout ||
-          e.type == DioExceptionType.connectionError) {
+      if (_isConnectionError(e)) {
         throw Exception('Unable to connect to the server.');
       }
 
       throw Exception('Unable to complete delivery. Please try again.');
     }
-  }
-
-  String _getDioMessage(DioException e) {
-    if (e.response?.statusCode == 400) {
-      return 'Invalid rider account.';
-    }
-
-    if (e.response?.statusCode == 500) {
-      return 'Server error. Please try again.';
-    }
-
-    if (e.type == DioExceptionType.connectionTimeout ||
-        e.type == DioExceptionType.receiveTimeout ||
-        e.type == DioExceptionType.connectionError) {
-      return 'Unable to connect to the server.';
-    }
-
-    return 'Unable to load assigned orders.';
   }
 
   // ============================================================
@@ -316,19 +297,20 @@ class RiderService {
         throw Exception(e.response?.data['message'].toString());
       }
 
+      if (_isConnectionError(e)) {
+        throw Exception('Unable to connect to the server.');
+      }
+
       throw Exception('Unable to load pickup orders.');
     }
   }
 
   // ============================================================
-  // PICKUP
+  // COMPLETE PICKUP
   // ============================================================
   //
-  // Pickup bottles are intentionally NOT sent to the server
-  // individually anymore.
-  //
-  // The scanner stores them temporarily in PickupScanScreen.
-  // They are committed together when completePickup() is called.
+  // Pickup bottles are collected temporarily in the scanner
+  // screen and submitted together when the rider confirms.
   //
 
   Future<Map<String, dynamic>> completePickup({
@@ -348,9 +330,12 @@ class RiderService {
         },
       );
 
-      if (response.data['success'] != true) {
+      if (response.data is! Map || response.data['success'] != true) {
         throw Exception(
-          response.data['message']?.toString() ?? 'Unable to complete pickup.',
+          response.data is Map
+              ? response.data['message']?.toString() ??
+                    'Unable to complete pickup.'
+              : 'Unable to complete pickup.',
         );
       }
 
@@ -360,13 +345,38 @@ class RiderService {
         throw Exception(e.response?.data['message'].toString());
       }
 
-      if (e.type == DioExceptionType.connectionTimeout ||
-          e.type == DioExceptionType.receiveTimeout ||
-          e.type == DioExceptionType.connectionError) {
+      if (_isConnectionError(e)) {
         throw Exception('Unable to connect to the server.');
       }
 
       throw Exception('Unable to complete pickup. Please try again.');
     }
+  }
+
+  // ============================================================
+  // ERROR HELPERS
+  // ============================================================
+
+  bool _isConnectionError(DioException e) {
+    return e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.receiveTimeout ||
+        e.type == DioExceptionType.connectionError;
+  }
+
+  String _getDioMessage(DioException e) {
+    if (e.response?.statusCode == 400) {
+      return 'Invalid rider account.';
+    }
+
+    if (e.response?.statusCode == 500) {
+      return 'Server error. Please try again.';
+    }
+
+    if (_isConnectionError(e)) {
+      return 'Unable to connect to the server.';
+    }
+
+    return 'Unable to load assigned orders.';
   }
 }

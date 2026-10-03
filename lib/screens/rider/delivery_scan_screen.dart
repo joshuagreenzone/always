@@ -31,6 +31,7 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
   final List<_PendingDeliveryBottle> _scannedBottles = [];
 
   bool _isProcessing = false;
+  bool _isNavigating = false;
 
   @override
   void dispose() {
@@ -39,23 +40,13 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
   }
 
   Future<void> _handleScan(BarcodeCapture capture) async {
-    if (_isProcessing) {
-      return;
-    }
+    if (_isProcessing || _isNavigating) return;
+    if (_scannedBottles.length >= widget.order.totalQuantity) return;
+    if (capture.barcodes.isEmpty) return;
 
-    if (_scannedBottles.length >= widget.order.totalQuantity) {
-      return;
-    }
+    final value = capture.barcodes.first.rawValue;
 
-    if (capture.barcodes.isEmpty) {
-      return;
-    }
-
-    final String? value = capture.barcodes.first.rawValue;
-
-    if (value == null || value.trim().isEmpty) {
-      return;
-    }
+    if (value == null || value.trim().isEmpty) return;
 
     await _processBottle(value.trim());
   }
@@ -65,8 +56,7 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
 
     if (!serviceEnabled) {
       throw Exception(
-        'Location services are turned off. '
-        'Please enable GPS and try again.',
+        'Location services are turned off. Please enable GPS and try again.',
       );
     }
 
@@ -93,7 +83,9 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
   }
 
   Future<void> _processBottle(String bottleNumber) async {
-    if (_isProcessing) {
+    if (_isProcessing || _isNavigating) return;
+
+    if (_scannedBottles.length >= widget.order.totalQuantity) {
       return;
     }
 
@@ -102,12 +94,19 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
     );
 
     if (alreadyScanned) {
+      await _pauseScanner();
+
+      if (!mounted) return;
+
       await _showMessage(
         'Already Scanned',
-        'This bottle has already been scanned '
-            'for this delivery.\n\n'
+        'This bottle has already been scanned for this delivery.\n\n'
             'Bottle: $bottleNumber',
       );
+
+      if (mounted && _canScanMore) {
+        await _resumeScanner();
+      }
 
       return;
     }
@@ -116,16 +115,12 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
       _isProcessing = true;
     });
 
-    try {
-      await _scannerController.stop();
-    } catch (_) {}
+    await _pauseScanner();
 
     try {
       final position = await _getCurrentLocation();
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       setState(() {
         _scannedBottles.add(
@@ -141,75 +136,73 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
       });
 
       final scanned = _scannedBottles.length;
-
       final required = widget.order.totalQuantity;
-
       final remaining = required - scanned;
 
-      if (scanned >= required) {
-        await _showMessage(
-          'Complete',
-          'All required bottles have been '
-              'scanned.\n\n'
-              'The bottles are temporarily stored '
-              'and have NOT been saved to the database yet.\n\n'
-              'Press Continue to confirm the delivery.',
-        );
-
-        return;
-      }
-
       await _showMessage(
-        'Bottle Scanned',
+        scanned == required ? 'All Bottles Scanned' : 'Bottle Scanned',
         'Bottle: $bottleNumber\n\n'
-            'Scanned: $scanned / $required\n'
-            'Remaining: $remaining\n\n'
-            'This bottle has NOT been saved to the '
-            'database yet.',
+        'Scanned: $scanned / $required\n'
+        'Remaining: $remaining\n\n'
+        'Scans are temporary until you confirm the delivery.',
       );
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
-      await _scannerController.start();
-    } catch (e) {
-      if (!mounted) {
-        return;
+      if (_canScanMore) {
+        await _resumeScanner();
       }
+    } catch (e) {
+      if (!mounted) return;
 
       setState(() {
         _isProcessing = false;
       });
 
-      String message = e.toString();
-
-      if (message.startsWith('Exception: ')) {
-        message = message.substring('Exception: '.length);
-      }
+      final message = e.toString().replaceFirst('Exception: ', '');
 
       await _showMessage('Unable to Scan Bottle', message);
 
-      if (!mounted) {
-        return;
+      if (mounted && _canScanMore) {
+        await _resumeScanner();
       }
-
-      await _scannerController.start();
     }
   }
 
-  Future<void> _continueToConfirmation() async {
-    if (_isProcessing || _scannedBottles.length != widget.order.totalQuantity) {
-      return;
-    }
+  bool get _canScanMore =>
+      !_isProcessing &&
+      !_isNavigating &&
+      _scannedBottles.length < widget.order.totalQuantity;
 
+  Future<void> _pauseScanner() async {
     try {
       await _scannerController.stop();
     } catch (_) {}
+  }
 
-    if (!mounted) {
+  Future<void> _resumeScanner() async {
+    if (!mounted || !_canScanMore) return;
+
+    try {
+      await _scannerController.start();
+    } catch (_) {}
+  }
+
+  Future<void> _continueToConfirmation() async {
+    if (_isProcessing ||
+        _isNavigating ||
+        _scannedBottles.isEmpty ||
+        _scannedBottles.length > widget.order.totalQuantity) {
       return;
     }
+
+    setState(() {
+      _isNavigating = true;
+    });
+
+    await _pauseScanner();
+
+    if (!mounted) return;
 
     final scannedBottleData = _scannedBottles.map((item) {
       return <String, dynamic>{
@@ -231,59 +224,47 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
       ),
     );
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
-    if (_scannedBottles.length < widget.order.totalQuantity) {
-      await _scannerController.start();
+    setState(() {
+      _isNavigating = false;
+    });
+
+    if (_canScanMore) {
+      await _resumeScanner();
     }
   }
 
   Future<void> _handleBack() async {
-    if (_isProcessing) {
-      return;
-    }
+    if (_isProcessing || _isNavigating) return;
 
     if (_scannedBottles.isEmpty) {
-      if (mounted) {
-        Navigator.pop(context);
-      }
-
+      if (mounted) Navigator.pop(context);
       return;
     }
 
     final discard = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (_) {
-        return AlertDialog(
-          title: const Text('Discard Scanned Bottles?'),
-          content: Text(
-            '${_scannedBottles.length} bottle'
-            '${_scannedBottles.length == 1 ? '' : 's'} '
-            'have been scanned but not saved.\n\n'
-            'If you leave this screen, these scans '
-            'will be discarded.\n\n'
-            'No database records have been created '
-            'by these scans.',
+      builder: (_) => AlertDialog(
+        title: const Text('Discard Scanned Bottles?'),
+        content: Text(
+          '${_scannedBottles.length} bottle'
+          '${_scannedBottles.length == 1 ? '' : 's'} '
+          'have been scanned but not saved.\n\n'
+          'Leaving this screen will discard these temporary scans.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Stay'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context, false);
-              },
-              child: const Text('Stay'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context, true);
-              },
-              child: const Text('Discard'),
-            ),
-          ],
-        );
-      },
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Discard'),
+          ),
+        ],
+      ),
     );
 
     if (discard == true && mounted) {
@@ -292,48 +273,37 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
     }
   }
 
-  Future<void> _showMessage(String title, String message) {
-    return showDialog(
+  Future<void> _showMessage(String title, String message) async {
+    if (!mounted) return;
+
+    await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) {
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: const Text('OK'),
-            ),
-          ],
-        );
-      },
+      builder: (_) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final required = widget.order.totalQuantity;
-
     final scanned = _scannedBottles.length;
-
-    final remaining = required - scanned;
-
-    final complete = scanned == required;
+    final remaining = (required - scanned).clamp(0, required);
+    final allScanned = required > 0 && scanned >= required;
+    final canContinue = scanned > 0 && !_isProcessing && !_isNavigating;
 
     return PopScope(
-      canPop: !_isProcessing && _scannedBottles.isEmpty,
+      canPop: !_isProcessing && !_isNavigating && _scannedBottles.isEmpty,
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) {
-          return;
-        }
-
-        if (_isProcessing) {
-          return;
-        }
-
+        if (didPop || _isProcessing || _isNavigating) return;
         await _handleBack();
       },
       child: Scaffold(
@@ -342,163 +312,180 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
           centerTitle: true,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: _isProcessing ? null : _handleBack,
+            onPressed: (_isProcessing || _isNavigating) ? null : _handleBack,
           ),
         ),
         body: SafeArea(
           child: Column(
             children: [
+              // Compact order summary: avoid a large notice that
+              // consumes the available scanner preview height.
               Padding(
-                padding: const EdgeInsets.all(AppSizes.screenPadding),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSizes.screenPadding,
+                  8,
+                  AppSizes.screenPadding,
+                  8,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       widget.order.customerName,
                       style: AppTextStyles.screenTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-
                     const SizedBox(height: AppSpacing.xs),
-
                     ...widget.order.items.map(
                       (item) => Text(
                         '${item.bottleType} × ${item.quantity}',
                         style: AppTextStyles.bodySecondary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-
-                    const SizedBox(height: AppSpacing.md),
-
+                    const SizedBox(height: AppSpacing.sm),
                     Row(
                       children: [
-                        Expanded(
-                          child: Text(
-                            'Bottles scanned',
-                            style: AppTextStyles.body,
-                          ),
-                        ),
+                        const Expanded(child: Text('Bottles scanned')),
                         Text(
                           '$scanned / $required',
                           style: AppTextStyles.dashboardTitle,
                         ),
                       ],
                     ),
-
-                    const SizedBox(height: AppSpacing.xs),
-
-                    Text(
-                      'Remaining: $remaining',
-                      style: AppTextStyles.bodySecondary,
-                    ),
-
-                    const SizedBox(height: AppSpacing.sm),
-
+                    const SizedBox(height: 4),
                     LinearProgressIndicator(
-                      value: required == 0 ? 0 : scanned / required,
+                      value: required <= 0
+                          ? 0
+                          : (scanned / required).clamp(0.0, 1.0),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      allScanned
+                          ? 'All ordered bottles scanned'
+                          : '$remaining remaining · Partial delivery allowed',
+                      style: AppTextStyles.bodySecondary,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
 
+              // The scanner occupies all remaining available height.
               Expanded(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    MobileScanner(
-                      controller: _scannerController,
-                      onDetect: _handleScan,
-                    ),
-
-                    Container(
-                      width: 250,
-                      height: 250,
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.white, width: 3),
-                        borderRadius: BorderRadius.circular(16),
+                child: ClipRect(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    alignment: Alignment.center,
+                    children: [
+                      MobileScanner(
+                        controller: _scannerController,
+                        onDetect: _handleScan,
                       ),
-                    ),
-
-                    if (_isProcessing)
-                      Container(
-                        color: Colors.black45,
-                        child: const Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CircularProgressIndicator(color: Colors.white),
-                            SizedBox(height: 16),
-                            Text(
-                              'Getting location...',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
+                      IgnorePointer(
+                        child: Center(
+                          child: Container(
+                            width: 250,
+                            height: 250,
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.white, width: 3),
+                              borderRadius: BorderRadius.circular(16),
                             ),
-                          ],
+                          ),
                         ),
                       ),
-                  ],
+                      if (_isProcessing)
+                        Container(
+                          color: Colors.black45,
+                          child: const Column(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              CircularProgressIndicator(color: Colors.white),
+                              SizedBox(height: 16),
+                              Text(
+                                'Getting location...',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
 
               if (_scannedBottles.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(AppSizes.screenPadding),
-                  child: SizedBox(
-                    height: 90,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _scannedBottles.length,
-                      itemBuilder: (_, index) {
-                        final bottle = _scannedBottles[index];
-
-                        return Container(
-                          margin: const EdgeInsets.only(right: AppSpacing.sm),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: AppColors.success),
-                            borderRadius: BorderRadius.circular(
-                              AppSizes.cardRadius,
-                            ),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(
-                                Icons.check_circle,
-                                color: AppColors.success,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                bottle.bottleNumber,
-                                style: AppTextStyles.body,
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                SizedBox(
+                  height: 70,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSizes.screenPadding,
+                      vertical: 6,
                     ),
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _scannedBottles.length,
+                    itemBuilder: (_, index) {
+                      final bottle = _scannedBottles[index];
+
+                      return Container(
+                        margin: const EdgeInsets.only(right: AppSpacing.sm),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppColors.success),
+                          borderRadius: BorderRadius.circular(
+                            AppSizes.cardRadius,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.check_circle,
+                              color: AppColors.success,
+                              size: 20,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              bottle.bottleNumber,
+                              style: AppTextStyles.body,
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 ),
 
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                   AppSizes.screenPadding,
-                  0,
+                  6,
                   AppSizes.screenPadding,
                   AppSizes.screenPadding,
                 ),
                 child: SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: complete && !_isProcessing
-                        ? _continueToConfirmation
-                        : null,
+                    onPressed: canContinue ? _continueToConfirmation : null,
                     child: Text(
-                      complete ? 'Continue' : 'Scan All Bottles First',
+                      scanned == 0
+                          ? 'Scan at Least One Bottle'
+                          : allScanned
+                          ? 'Continue to Confirmation'
+                          : 'Continue with $scanned Bottle'
+                                '${scanned == 1 ? '' : 's'}',
                     ),
                   ),
                 ),

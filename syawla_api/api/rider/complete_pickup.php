@@ -1,3 +1,4 @@
+
 <?php
 
 header('Content-Type: application/json');
@@ -7,190 +8,107 @@ require_once '../../config/database.php';
 $db = null;
 
 try {
-
     $database = new Database();
     $db = $database->connect();
 
     /*
-     * Accept JSON request.
+     * Read JSON request.
      */
     $rawInput = file_get_contents('php://input');
-
-    $input = json_decode(
-        $rawInput,
-        true
-    );
+    $input = json_decode($rawInput, true);
 
     if (!is_array($input)) {
         $input = [];
     }
 
-    $accId = isset($input['accId'])
-        ? (int) $input['accId']
-        : 0;
-
-    $orderId = isset($input['orderId'])
-        ? (int) $input['orderId']
-        : 0;
-
-    $deliveryId = isset($input['deliveryId'])
-        ? (int) $input['deliveryId']
-        : 0;
-
-    $bottles = isset($input['bottles'])
-        ? $input['bottles']
-        : [];
+    $accId = (int) ($input['accId'] ?? 0);
+    $orderId = (int) ($input['orderId'] ?? 0);
+    $deliveryId = (int) ($input['deliveryId'] ?? 0);
+    $bottles = $input['bottles'] ?? [];
 
     /*
      * Basic validation.
      */
-    if (
-        $accId <= 0 ||
-        $orderId <= 0 ||
-        $deliveryId <= 0
-    ) {
-
+    if ($accId <= 0 || $orderId <= 0 || $deliveryId <= 0) {
         http_response_code(400);
 
         echo json_encode([
             'success' => false,
-            'message' =>
-                'Invalid account, order, or delivery.'
+            'message' => 'Invalid account, order, or delivery.'
         ]);
-
         exit;
     }
 
-    if (!is_array($bottles)) {
-
+    if (!is_array($bottles) || count($bottles) === 0) {
         http_response_code(400);
 
         echo json_encode([
             'success' => false,
-            'message' =>
-                'Invalid bottle list.'
+            'message' => 'Please scan at least one bottle.'
         ]);
-
         exit;
     }
 
-    if (count($bottles) === 0) {
-
-        http_response_code(400);
-
-        echo json_encode([
-            'success' => false,
-            'message' =>
-                'Please scan at least one bottle.'
-        ]);
-
-        exit;
-    }
-
-    /*
-     * Maximum protection against accidentally huge
-     * requests.
-     *
-     * The actual quantity is still checked against
-     * delivered bottles below.
-     */
     if (count($bottles) > 500) {
-
         http_response_code(400);
 
         echo json_encode([
             'success' => false,
-            'message' =>
-                'Too many bottles submitted.'
+            'message' => 'Too many bottles submitted.'
         ]);
-
         exit;
     }
 
     /*
-     * Validate and normalize bottle input.
-     *
-     * Expected:
-     *
-     * {
-     *   "bottleNumber": "...",
-     *   "latitude": 12.345,
-     *   "longitude": 123.456,
-     *   "accuracy": 5.2
-     * }
+     * Normalize and validate scanned bottles.
      */
     $normalizedBottles = [];
+    $seenBottleNumbers = [];
 
     foreach ($bottles as $index => $bottle) {
-
         if (!is_array($bottle)) {
-
             http_response_code(400);
 
             echo json_encode([
                 'success' => false,
-                'message' =>
-                    'Invalid bottle data at position ' .
-                    ($index + 1) . '.'
+                'message' => 'Invalid bottle data at position '
+                    . ($index + 1) . '.'
             ]);
-
             exit;
         }
 
-        $bottleNumber = isset($bottle['bottleNumber'])
-            ? trim((string) $bottle['bottleNumber'])
-            : '';
+        $bottleNumber = trim(
+            (string) ($bottle['bottleNumber'] ?? '')
+        );
 
         if ($bottleNumber === '') {
-
             http_response_code(400);
 
             echo json_encode([
                 'success' => false,
-                'message' =>
-                    'Bottle number is required at position ' .
-                    ($index + 1) . '.'
+                'message' => 'Bottle number is required at position '
+                    . ($index + 1) . '.'
             ]);
-
-            exit;
-        }
-
-        /*
-         * GPS values are required for a confirmed pickup.
-         */
-        if (
-            !isset($bottle['latitude']) ||
-            !isset($bottle['longitude']) ||
-            !isset($bottle['accuracy'])
-        ) {
-
-            http_response_code(400);
-
-            echo json_encode([
-                'success' => false,
-                'message' =>
-                    'GPS location is required for bottle ' .
-                    $bottleNumber . '.'
-            ]);
-
             exit;
         }
 
         if (
+            !isset(
+                $bottle['latitude'],
+                $bottle['longitude'],
+                $bottle['accuracy']
+            ) ||
             !is_numeric($bottle['latitude']) ||
             !is_numeric($bottle['longitude']) ||
             !is_numeric($bottle['accuracy'])
         ) {
-
             http_response_code(400);
 
             echo json_encode([
                 'success' => false,
-                'message' =>
-                    'Invalid GPS data for bottle ' .
-                    $bottleNumber . '.'
+                'message' => 'Valid GPS location and accuracy are required '
+                    . 'for bottle ' . $bottleNumber . '.'
             ]);
-
             exit;
         }
 
@@ -198,79 +116,37 @@ try {
         $longitude = (float) $bottle['longitude'];
         $accuracy = (float) $bottle['accuracy'];
 
-        /*
-         * Validate coordinate ranges.
-         */
         if (
-            $latitude < -90 ||
-            $latitude > 90
+            $latitude < -90 || $latitude > 90 ||
+            $longitude < -180 || $longitude > 180 ||
+            $accuracy < 0
         ) {
-
             http_response_code(400);
 
             echo json_encode([
                 'success' => false,
-                'message' =>
-                    'Invalid latitude for bottle ' .
-                    $bottleNumber . '.'
+                'message' => 'Invalid GPS coordinates or accuracy for bottle '
+                    . $bottleNumber . '.'
             ]);
-
             exit;
         }
 
-        if (
-            $longitude < -180 ||
-            $longitude > 180
-        ) {
-
-            http_response_code(400);
-
-            echo json_encode([
-                'success' => false,
-                'message' =>
-                    'Invalid longitude for bottle ' .
-                    $bottleNumber . '.'
-            ]);
-
-            exit;
-        }
-
-        if ($accuracy < 0) {
-
-            http_response_code(400);
-
-            echo json_encode([
-                'success' => false,
-                'message' =>
-                    'Invalid GPS accuracy for bottle ' .
-                    $bottleNumber . '.'
-            ]);
-
-            exit;
-        }
-
-        /*
-         * Prevent duplicate bottle numbers within the
-         * same submission.
-         */
         $duplicateKey = strtoupper($bottleNumber);
 
-        if (isset($normalizedBottles[$duplicateKey])) {
-
+        if (isset($seenBottleNumbers[$duplicateKey])) {
             http_response_code(400);
 
             echo json_encode([
                 'success' => false,
-                'message' =>
-                    'Bottle ' .
-                    $bottleNumber .
-                    ' was scanned more than once.'
+                'message' => 'Bottle ' . $bottleNumber
+                    . ' was scanned more than once.'
             ]);
-
             exit;
         }
 
-        $normalizedBottles[$duplicateKey] = [
+        $seenBottleNumbers[$duplicateKey] = true;
+
+        $normalizedBottles[] = [
             'bottleNumber' => $bottleNumber,
             'latitude' => $latitude,
             'longitude' => $longitude,
@@ -279,26 +155,14 @@ try {
     }
 
     /*
-     * Convert associative array back to indexed array.
+     * Verify rider account.
      */
-    $normalizedBottles = array_values(
-        $normalizedBottles
-    );
-
-    /*
-     * Validate rider account.
-     */
-    $accountSql = "
-        SELECT
-            AccID,
-            AccName,
-            AccType
+    $accountStmt = $db->prepare("
+        SELECT AccID, AccName, AccType
         FROM accounts
         WHERE AccID = :accId
         LIMIT 1
-    ";
-
-    $accountStmt = $db->prepare($accountSql);
+    ");
 
     $accountStmt->execute([
         ':accId' => $accId
@@ -306,65 +170,37 @@ try {
 
     $account = $accountStmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$account) {
-
+    if (!$account || $account['AccType'] !== 'RIDER') {
         http_response_code(403);
 
         echo json_encode([
             'success' => false,
-            'message' => 'Account not found.'
+            'message' => 'Only a valid rider account can complete a bottle pickup.'
         ]);
-
         exit;
     }
 
-    if ($account['AccType'] !== 'RIDER') {
-
-        http_response_code(403);
-
-        echo json_encode([
-            'success' => false,
-            'message' =>
-                'Only riders can complete a bottle pickup.'
-        ]);
-
-        exit;
-    }
-
-    /*
-     * Start transaction before validating and creating
-     * pickup records.
-     */
     $db->beginTransaction();
 
     /*
-     * Lock the delivery/order relationship.
-     *
-     * Quantity and UnitPrice are intentionally retained
-     * here for compatibility, but they are NO LONGER used
-     * to calculate the total order amount.
+     * Lock and validate the delivery assigned to this rider.
      */
-    $deliverySql = "
+    $deliveryStmt = $db->prepare("
         SELECT
             d.DeliveryID,
             d.OrderID,
             d.AccID,
             d.DeliveryStatus,
-            o.CustomerID,
-            o.Quantity,
-            o.UnitPrice,
-            o.PaymentStatus
+            o.CustomerID
         FROM delivery d
         INNER JOIN orders o
-            ON d.OrderID = o.OrderID
+            ON o.OrderID = d.OrderID
         WHERE d.DeliveryID = :deliveryId
           AND d.OrderID = :orderId
           AND d.AccID = :accId
         LIMIT 1
         FOR UPDATE
-    ";
-
-    $deliveryStmt = $db->prepare($deliverySql);
+    ");
 
     $deliveryStmt->execute([
         ':deliveryId' => $deliveryId,
@@ -375,124 +211,61 @@ try {
     $delivery = $deliveryStmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$delivery) {
-
-        $db->rollBack();
-
-        http_response_code(403);
-
-        echo json_encode([
-            'success' => false,
-            'message' =>
-                'This delivery is not assigned to this rider.'
-        ]);
-
-        exit;
+        throw new DomainException(
+            'This delivery is not assigned to this rider.'
+        );
     }
 
     /*
-     * Pickup is only allowed after the delivery has
-     * been completed.
+     * Pickup is allowed for completed or incomplete deliveries.
      */
-    if ($delivery['DeliveryStatus'] !== 'DELIVERED') {
+    $allowedStatuses = ['DELIVERED', 'INCOMPLETE'];
 
-        $db->rollBack();
-
-        http_response_code(400);
-
-        echo json_encode([
-            'success' => false,
-            'message' =>
-                'Bottles can only be picked up after the delivery is completed.'
-        ]);
-
-        exit;
+    if (!in_array($delivery['DeliveryStatus'], $allowedStatuses, true)) {
+        throw new DomainException(
+            'Bottles can only be picked up after the delivery '
+            . 'is completed or marked incomplete.'
+        );
     }
 
     /*
-     * Count bottles that were actually delivered.
+     * Count bottles actually delivered for this delivery.
      */
-    $deliveredCountSql = "
-        SELECT
-            COUNT(*) AS DeliveredCount
-        FROM order_delivery_transaction odt
-        WHERE odt.OrderID = :orderId
-          AND odt.DeliveryID = :deliveryId
-    ";
+    $deliveredStmt = $db->prepare("
+        SELECT COUNT(*)
+        FROM order_delivery_transaction
+        WHERE OrderID = :orderId
+          AND DeliveryID = :deliveryId
+    ");
 
-    $deliveredCountStmt = $db->prepare(
-        $deliveredCountSql
-    );
-
-    $deliveredCountStmt->execute([
+    $deliveredStmt->execute([
         ':orderId' => $orderId,
         ':deliveryId' => $deliveryId
     ]);
 
-    $deliveredCountRow =
-        $deliveredCountStmt->fetch(PDO::FETCH_ASSOC);
-
-    $deliveredCount =
-        (int) $deliveredCountRow['DeliveredCount'];
+    $deliveredCount = (int) $deliveredStmt->fetchColumn();
 
     if ($deliveredCount <= 0) {
-
-        $db->rollBack();
-
-        http_response_code(400);
-
-        echo json_encode([
-            'success' => false,
-            'message' =>
-                'No delivered bottles were found for this order.'
-        ]);
-
-        exit;
+        throw new DomainException(
+            'No delivered bottles were found for this delivery.'
+        );
     }
 
     /*
-     * Prevent picking up more bottles than were delivered.
+     * Create pickup header inside the transaction.
      */
-    if (count($normalizedBottles) > $deliveredCount) {
-
-        $db->rollBack();
-
-        http_response_code(400);
-
-        echo json_encode([
-            'success' => false,
-            'message' =>
-                'The number of bottles being picked up exceeds the number delivered.',
-            'data' => [
-                'deliveredCount' => $deliveredCount,
-                'submittedCount' => count($normalizedBottles)
-            ]
-        ]);
-
-        exit;
-    }
-
-    /*
-     * Create the pickup header.
-     *
-     * Nothing has been permanently saved yet because
-     * the entire operation is inside the transaction.
-     */
-    $pickupSql = "
-        INSERT INTO pickup
-        (
+    $pickupStmt = $db->prepare("
+        INSERT INTO pickup (
             DeliveryID,
             AccID,
             PickUpDateTime
         )
-        VALUES
-        (
+        VALUES (
             :deliveryId,
             :accId,
             NOW()
         )
-    ";
-
-    $pickupStmt = $db->prepare($pickupSql);
+    ");
 
     $pickupStmt->execute([
         ':deliveryId' => $deliveryId,
@@ -502,79 +275,58 @@ try {
     $pickUpId = (int) $db->lastInsertId();
 
     /*
-     * Prepared statements for bottle processing.
+     * Prepared statements for bottle validation.
      */
-    $bottleSql = "
-        SELECT
-            b.BottleID,
-            b.BottleNumber
-        FROM bottles b
-        WHERE b.BottleNumber = :bottleNumber
+    $bottleStmt = $db->prepare("
+        SELECT BottleID, BottleNumber
+        FROM bottles
+        WHERE BottleNumber = :bottleNumber
         LIMIT 1
         FOR UPDATE
-    ";
+    ");
 
-    $bottleStmt = $db->prepare($bottleSql);
-
-    /*
-     * Verify the bottle belongs to this delivery.
-     */
-    $odtSql = "
-        SELECT
-            odt.ODTID,
-            odt.BottleID
-        FROM order_delivery_transaction odt
-        WHERE odt.OrderID = :orderId
-          AND odt.DeliveryID = :deliveryId
-          AND odt.BottleID = :bottleId
+    $odtStmt = $db->prepare("
+        SELECT ODTID, BottleID
+        FROM order_delivery_transaction
+        WHERE OrderID = :orderId
+          AND DeliveryID = :deliveryId
+          AND BottleID = :bottleId
         LIMIT 1
-    ";
-
-    $odtStmt = $db->prepare($odtSql);
+    ");
 
     /*
-     * Check whether the bottle has already been picked
-     * up for this delivery.
+     * Prevent a bottle from being picked up twice
+     * for the same delivery.
      */
-    $existingDptSql = "
-        SELECT
-            dpt.DPTID
+    $existingPickupStmt = $db->prepare("
+        SELECT dpt.DPTID
         FROM delivery_pickup_transaction dpt
         INNER JOIN pickup p
-            ON dpt.PickUpID = p.PickUpID
+            ON p.PickUpID = dpt.PickUpID
         WHERE p.DeliveryID = :deliveryId
           AND dpt.BottleID = :bottleId
         LIMIT 1
-    ";
-
-    $existingDptStmt = $db->prepare(
-        $existingDptSql
-    );
+    ");
 
     /*
      * Insert pickup transaction.
      */
-    $dptSql = "
-        INSERT INTO delivery_pickup_transaction
-        (
+    $insertDptStmt = $db->prepare("
+        INSERT INTO delivery_pickup_transaction (
             PickUpID,
             BottleID
         )
-        VALUES
-        (
+        VALUES (
             :pickUpId,
             :bottleId
         )
-    ";
-
-    $dptStmt = $db->prepare($dptSql);
+    ");
 
     /*
-     * Insert immutable pickup scan audit.
+     * Record pickup scan and GPS information.
      */
-    $scanEventSql = "
-        INSERT INTO bottle_scan_event
-        (
+    $scanEventStmt = $db->prepare("
+        INSERT INTO bottle_scan_event (
             BottleID,
             AccID,
             EventType,
@@ -589,8 +341,7 @@ try {
             LocationAccuracy,
             CreatedAt
         )
-        VALUES
-        (
+        VALUES (
             :bottleId,
             :accId,
             'PICKUP_SCAN',
@@ -605,47 +356,32 @@ try {
             :accuracy,
             NOW()
         )
-    ";
+    ");
 
-    $scanEventStmt = $db->prepare(
-        $scanEventSql
-    );
-
-    /*
-     * Process every temporarily scanned bottle.
-     */
     $confirmedBottles = [];
 
+    /*
+     * Validate every scanned bottle before committing.
+     */
     foreach ($normalizedBottles as $pendingBottle) {
+        $bottleNumber = $pendingBottle['bottleNumber'];
 
-        $bottleNumber =
-            $pendingBottle['bottleNumber'];
-
-        /*
-         * Find and lock bottle.
-         */
         $bottleStmt->execute([
             ':bottleNumber' => $bottleNumber
         ]);
 
-        $bottle =
-            $bottleStmt->fetch(PDO::FETCH_ASSOC);
+        $bottle = $bottleStmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$bottle) {
-
-            throw new RuntimeException(
-                'Bottle ' .
-                $bottleNumber .
-                ' was not found.'
+            throw new DomainException(
+                'Bottle ' . $bottleNumber . ' was not found.'
             );
         }
 
-        $bottleId =
-            (int) $bottle['BottleID'];
+        $bottleId = (int) $bottle['BottleID'];
 
         /*
-         * Confirm that this exact bottle was part of
-         * this delivery.
+         * Confirm that this bottle was delivered on this delivery.
          */
         $odtStmt->execute([
             ':orderId' => $orderId,
@@ -653,54 +389,44 @@ try {
             ':bottleId' => $bottleId
         ]);
 
-        $odt =
-            $odtStmt->fetch(PDO::FETCH_ASSOC);
+        $odt = $odtStmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$odt) {
-
-            throw new RuntimeException(
-                'Bottle ' .
-                $bottleNumber .
-                ' does not belong to this delivery.'
+            throw new DomainException(
+                'Bottle ' . $bottleNumber
+                . ' was not delivered on this delivery and cannot be picked up.'
             );
         }
 
-        $odtId =
-            (int) $odt['ODTID'];
+        $odtId = (int) $odt['ODTID'];
 
         /*
-         * Prevent duplicate pickup for this delivery.
+         * Prevent duplicate pickup.
          */
-        $existingDptStmt->execute([
+        $existingPickupStmt->execute([
             ':deliveryId' => $deliveryId,
             ':bottleId' => $bottleId
         ]);
 
-        $existingDpt =
-            $existingDptStmt->fetch(PDO::FETCH_ASSOC);
-
-        if ($existingDpt) {
-
-            throw new RuntimeException(
-                'Bottle ' .
-                $bottleNumber .
-                ' has already been picked up for this delivery.'
+        if ($existingPickupStmt->fetch(PDO::FETCH_ASSOC)) {
+            throw new DomainException(
+                'Bottle ' . $bottleNumber
+                . ' has already been picked up for this delivery.'
             );
         }
 
         /*
-         * Create business pickup transaction.
+         * Save pickup transaction.
          */
-        $dptStmt->execute([
+        $insertDptStmt->execute([
             ':pickUpId' => $pickUpId,
             ':bottleId' => $bottleId
         ]);
 
-        $dptId =
-            (int) $db->lastInsertId();
+        $dptId = (int) $db->lastInsertId();
 
         /*
-         * Create immutable scan audit record.
+         * Save scan audit record.
          */
         $scanEventStmt->execute([
             ':bottleId' => $bottleId,
@@ -710,12 +436,9 @@ try {
             ':pickUpId' => $pickUpId,
             ':odtId' => $odtId,
             ':dptId' => $dptId,
-            ':latitude' =>
-                $pendingBottle['latitude'],
-            ':longitude' =>
-                $pendingBottle['longitude'],
-            ':accuracy' =>
-                $pendingBottle['accuracy']
+            ':latitude' => $pendingBottle['latitude'],
+            ':longitude' => $pendingBottle['longitude'],
+            ':accuracy' => $pendingBottle['accuracy']
         ]);
 
         $confirmedBottles[] = [
@@ -726,224 +449,122 @@ try {
         ];
     }
 
-    /*
-     * Safety check.
-     */
     if (count($confirmedBottles) === 0) {
-
-        throw new RuntimeException(
+        throw new DomainException(
             'No bottles were confirmed for pickup.'
         );
     }
 
     /*
-     * Calculate total bottles picked up for this
-     * delivery after this transaction.
+     * Count all bottles picked up for this delivery.
      */
-    $pickedUpCountSql = "
-        SELECT
-            COUNT(*) AS PickedUpCount
+    $pickedUpStmt = $db->prepare("
+        SELECT COUNT(*)
         FROM delivery_pickup_transaction dpt
         INNER JOIN pickup p
-            ON dpt.PickUpID = p.PickUpID
+            ON p.PickUpID = dpt.PickUpID
         WHERE p.DeliveryID = :deliveryId
-          AND p.AccID = :accId
-    ";
+    ");
 
-    $pickedUpCountStmt = $db->prepare(
-        $pickedUpCountSql
-    );
-
-    $pickedUpCountStmt->execute([
-        ':deliveryId' => $deliveryId,
-        ':accId' => $accId
+    $pickedUpStmt->execute([
+        ':deliveryId' => $deliveryId
     ]);
 
-    $pickedUpCountRow =
-        $pickedUpCountStmt->fetch(PDO::FETCH_ASSOC);
-
-    $pickedUpCount =
-        (int) $pickedUpCountRow['PickedUpCount'];
+    $pickedUpCount = (int) $pickedUpStmt->fetchColumn();
 
     /*
-     * ============================================================
-     * PAYMENT CALCULATION
-     * ============================================================
+     * Calculate the value of bottles actually delivered.
      *
-     * IMPORTANT:
-     *
-     * The old system calculated:
-     *
-     *     orders.Quantity * orders.UnitPrice
-     *
-     * That only works for the old single-bottle-type order model.
-     *
-     * The current system supports multiple order_items:
-     *
-     *     Round Gallon × 2 @ 50 = 100
-     *     Wilkins Gallon × 1 @ 60 = 60
-     *
-     *     Total = 160
-     *
-     * Therefore the authoritative order total comes from:
-     *
-     *     SUM(order_items.Quantity * order_items.UnitPrice)
-     *
-     * ============================================================
+     * This deliberately excludes order items that were
+     * not delivered. Each ODT record represents one bottle.
      */
+    $deliveredValueStmt = $db->prepare("
+        SELECT COALESCE(SUM(oi.UnitPrice), 0)
+        FROM order_delivery_transaction odt
+        INNER JOIN order_items oi
+            ON oi.OrderItemID = odt.OrderItemID
+        WHERE odt.OrderID = :orderId
+          AND odt.DeliveryID = :deliveryId
+    ");
 
-    $totalSql = "
-        SELECT
-            COALESCE(
-                SUM(oi.Quantity * oi.UnitPrice),
-                0
-            ) AS TotalAmount
-        FROM order_items oi
-        WHERE oi.OrderID = :orderId
-    ";
-
-    $totalStmt = $db->prepare($totalSql);
-
-    $totalStmt->execute([
-        ':orderId' => $orderId
+    $deliveredValueStmt->execute([
+        ':orderId' => $orderId,
+        ':deliveryId' => $deliveryId
     ]);
 
-    $totalRow =
-        $totalStmt->fetch(PDO::FETCH_ASSOC);
-
-    $totalAmount = round(
-        (float) ($totalRow['TotalAmount'] ?? 0),
+    $deliveredAmount = round(
+        (float) $deliveredValueStmt->fetchColumn(),
         2
     );
 
     /*
-     * An order without valid order_items cannot have
-     * a meaningful payment balance.
+     * Calculate payments already allocated to this order.
+     *
+     * Pickup does not create or modify payment records.
      */
-    if ($totalAmount <= 0) {
-
-        throw new RuntimeException(
-            'This order has no valid order items or has a zero total amount.'
-        );
-    }
-
-    /*
-     * Calculate all payments already allocated to
-     * this order.
-     */
-    $paidSql = "
-        SELECT
-            COALESCE(
-                SUM(opt.Amount),
-                0
-            ) AS PaidAmount
-        FROM order_payment_transaction opt
-        INNER JOIN payments p
-            ON opt.PaymentID = p.PaymentID
-        WHERE opt.OrderID = :orderId
-    ";
-
-    $paidStmt = $db->prepare($paidSql);
+    $paidStmt = $db->prepare("
+        SELECT COALESCE(SUM(Amount), 0)
+        FROM order_payment_transaction
+        WHERE OrderID = :orderId
+    ");
 
     $paidStmt->execute([
         ':orderId' => $orderId
     ]);
 
-    $paidRow =
-        $paidStmt->fetch(PDO::FETCH_ASSOC);
-
     $paidAmount = round(
-        (float) ($paidRow['PaidAmount'] ?? 0),
+        (float) $paidStmt->fetchColumn(),
         2
     );
 
     /*
-     * Calculate the remaining customer balance.
+     * Balance is based on delivered value, not the full
+     * original order value.
      */
     $outstandingAmount = round(
-        $totalAmount - $paidAmount,
+        max(0, $deliveredAmount - $paidAmount),
         2
     );
 
-    /*
-     * Protect against tiny floating-point differences.
-     */
     if ($outstandingAmount <= 0.01) {
-
         $outstandingAmount = 0;
-
         $paymentStatus = 'PAID';
-
     } elseif ($paidAmount > 0) {
-
         $paymentStatus = 'PARTIALLY_PAID';
-
     } else {
-
         $paymentStatus = 'UNPAID';
     }
 
     /*
-     * Commit:
-     *
-     * pickup
-     * DPT
-     * bottle_scan_event
-     *
-     * are all committed together.
+     * Commit pickup records and scan events together.
      */
     $db->commit();
 
-    /*
-     * Return confirmed pickup information.
-     */
     echo json_encode([
         'success' => true,
-        'message' =>
-            'Bottle pickup completed successfully.',
+        'message' => 'Bottle pickup completed successfully.',
         'data' => [
             'pickUpId' => $pickUpId,
             'orderId' => $orderId,
             'deliveryId' => $deliveryId,
-
-            'scannedCount' =>
-                count($confirmedBottles),
-
-            'pickedUpCount' =>
-                $pickedUpCount,
-
-            'deliveredCount' =>
-                $deliveredCount,
-
-            'remainingCount' =>
-                $deliveredCount - $pickedUpCount,
-
-            /*
-             * Payment information.
-             */
-            'paymentStatus' =>
-                $paymentStatus,
-
-            'totalAmount' =>
-                $totalAmount,
-
-            'paidAmount' =>
-                $paidAmount,
-
-            'outstandingAmount' =>
-                $outstandingAmount,
-
-            'bottles' =>
-                $confirmedBottles
+            'scannedCount' => count($confirmedBottles),
+            'pickedUpCount' => $pickedUpCount,
+            'deliveredCount' => $deliveredCount,
+            'remainingCount' => max(
+                0,
+                $deliveredCount - $pickedUpCount
+            ),
+            'paymentStatus' => $paymentStatus,
+            'totalAmount' => $deliveredAmount,
+            'deliveredAmount' => $deliveredAmount,
+            'paidAmount' => $paidAmount,
+            'outstandingAmount' => $outstandingAmount,
+            'bottles' => $confirmedBottles
         ]
     ]);
 
-} catch (RuntimeException $e) {
-
-    if (
-        $db !== null &&
-        $db->inTransaction()
-    ) {
+} catch (DomainException $e) {
+    if ($db !== null && $db->inTransaction()) {
         $db->rollBack();
     }
 
@@ -955,36 +576,35 @@ try {
     ]);
 
 } catch (PDOException $e) {
-
-    if (
-        $db !== null &&
-        $db->inTransaction()
-    ) {
+    if ($db !== null && $db->inTransaction()) {
         $db->rollBack();
     }
+
+    error_log(
+        'Syawla pickup database error: ' . $e->getMessage()
+    );
 
     http_response_code(500);
 
     echo json_encode([
         'success' => false,
-        'message' => 'Database error.'
+        'message' => 'Database error while completing pickup.'
     ]);
 
 } catch (Throwable $e) {
-
-    if (
-        $db !== null &&
-        $db->inTransaction()
-    ) {
+    if ($db !== null && $db->inTransaction()) {
         $db->rollBack();
     }
+
+    error_log(
+        'Syawla pickup error: ' . $e->getMessage()
+    );
 
     http_response_code(500);
 
     echo json_encode([
         'success' => false,
-        'message' =>
-            'Unable to complete bottle pickup.'
+        'message' => 'Unable to complete bottle pickup.'
     ]);
 }
 ?>
