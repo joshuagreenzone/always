@@ -7,10 +7,13 @@ import '../../theme/app_colors.dart';
 import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_text_styles.dart';
+
+import '../login/login_screen.dart';
 import '../refill/refill_history_screen.dart';
 import '../refill/refill_screen.dart';
 import '../refill/refilled_bottles_screen.dart';
-import '../login/login_screen.dart';
+
+import 'bottle_registration_screen.dart';
 
 class StationWorkerHomeScreen extends StatelessWidget {
   final Account account;
@@ -29,7 +32,9 @@ class StationWorkerHomeScreen extends StatelessWidget {
           content: const Text('Are you sure you want to logout?'),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
               child: const Text('Cancel'),
             ),
             ElevatedButton(
@@ -66,12 +71,22 @@ class StationWorkerHomeScreen extends StatelessWidget {
       backgroundColor: const Color(0xFFF4F6F9),
       body: CustomScrollView(
         slivers: [
+          // --------------------------------------------------
+          // HERO HEADER
+          // --------------------------------------------------
+
           SliverToBoxAdapter(
             child: _HeroHeader(
               name: account.accName,
-              onLogout: () => _showLogoutDialog(context),
+              onLogout: () {
+                _showLogoutDialog(context);
+              },
             ),
           ),
+
+          // --------------------------------------------------
+          // QUICK ACTIONS
+          // --------------------------------------------------
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(
               AppSizes.screenPadding,
@@ -153,6 +168,27 @@ class StationWorkerHomeScreen extends StatelessWidget {
                     );
                   },
                 ),
+
+                const SizedBox(height: AppSpacing.md),
+
+                // --------------------------------------------------
+                // BOTTLE REGISTRATION
+                // --------------------------------------------------
+                _DashboardCard(
+                  icon: Icons.qr_code_scanner_rounded,
+                  iconColor: const Color(0xFF059669),
+                  title: 'Bottle Registration',
+                  description: 'Register bottles using their legacy QR codes.',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            BottleRegistrationScreen(account: account),
+                      ),
+                    );
+                  },
+                ),
               ]),
             ),
           ),
@@ -161,6 +197,10 @@ class StationWorkerHomeScreen extends StatelessWidget {
     );
   }
 }
+
+// ==================================================================
+// HERO HEADER
+// ==================================================================
 
 class _HeroHeader extends StatefulWidget {
   final String name;
@@ -179,6 +219,7 @@ class _HeroHeaderState extends State<_HeroHeader>
   @override
   void initState() {
     super.initState();
+
     _waveController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
@@ -202,7 +243,10 @@ class _HeroHeaderState extends State<_HeroHeader>
       builder: (context, child) {
         return Stack(
           children: [
-            // Background Layer: Soft secondary wave effect for depth
+            // --------------------------------------------------
+            // BACKGROUND WAVE
+            // --------------------------------------------------
+
             ClipPath(
               clipper: DynamicWaveClipper(
                 animationValue: _waveController!.value,
@@ -216,7 +260,9 @@ class _HeroHeaderState extends State<_HeroHeader>
               ),
             ),
 
-            // Foreground Layer: Gradient container with wave clipper
+            // --------------------------------------------------
+            // FOREGROUND WAVE
+            // --------------------------------------------------
             ClipPath(
               clipper: DynamicWaveClipper(
                 animationValue: _waveController!.value,
@@ -243,7 +289,10 @@ class _HeroHeaderState extends State<_HeroHeader>
                     ),
                     child: Column(
                       children: [
-                        // Logout Action Button
+                        // --------------------------------------------------
+                        // LOGOUT
+                        // --------------------------------------------------
+
                         Align(
                           alignment: Alignment.centerRight,
                           child: IconButton(
@@ -265,7 +314,9 @@ class _HeroHeaderState extends State<_HeroHeader>
 
                         const SizedBox(height: 4),
 
-                        // Floating Elevated Logo Avatar
+                        // --------------------------------------------------
+                        // LOGO
+                        // --------------------------------------------------
                         Container(
                           width: 88,
                           height: 88,
@@ -291,7 +342,9 @@ class _HeroHeaderState extends State<_HeroHeader>
 
                         const SizedBox(height: AppSpacing.md),
 
-                        // Welcome Message
+                        // --------------------------------------------------
+                        // WELCOME
+                        // --------------------------------------------------
                         Text(
                           'Welcome, ${widget.name}',
                           style: AppTextStyles.headline.copyWith(
@@ -304,7 +357,9 @@ class _HeroHeaderState extends State<_HeroHeader>
 
                         const SizedBox(height: 8),
 
-                        // Station Worker Role Badge
+                        // --------------------------------------------------
+                        // ROLE
+                        // --------------------------------------------------
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
@@ -339,6 +394,10 @@ class _HeroHeaderState extends State<_HeroHeader>
   }
 }
 
+// ==================================================================
+// WAVE CLIPPER
+// ==================================================================
+
 class DynamicWaveClipper extends CustomClipper<Path> {
   final double animationValue;
   final double waveFrequency;
@@ -355,11 +414,13 @@ class DynamicWaveClipper extends CustomClipper<Path> {
   @override
   Path getClip(Size size) {
     final path = Path();
+
     path.lineTo(0, size.height - 35);
 
     for (double i = 0; i <= size.width; i++) {
-      double relativeX = i / size.width;
-      double y =
+      final double relativeX = i / size.width;
+
+      final double y =
           size.height -
           35 +
           math.sin(
@@ -368,11 +429,14 @@ class DynamicWaveClipper extends CustomClipper<Path> {
                     phaseOffset,
               ) *
               waveHeight;
+
       path.lineTo(i, y);
     }
 
     path.lineTo(size.width, 0);
+
     path.close();
+
     return path;
   }
 
@@ -381,6 +445,10 @@ class DynamicWaveClipper extends CustomClipper<Path> {
     return true;
   }
 }
+
+// ==================================================================
+// DASHBOARD CARD
+// ==================================================================
 
 class _DashboardCard extends StatelessWidget {
   final IconData icon;
@@ -422,6 +490,10 @@ class _DashboardCard extends StatelessWidget {
             padding: const EdgeInsets.all(16.0),
             child: Row(
               children: [
+                // --------------------------------------------------
+                // ICON
+                // --------------------------------------------------
+
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -433,6 +505,9 @@ class _DashboardCard extends StatelessWidget {
 
                 const SizedBox(width: AppSpacing.md),
 
+                // --------------------------------------------------
+                // TEXT
+                // --------------------------------------------------
                 Expanded(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -467,6 +542,9 @@ class _DashboardCard extends StatelessWidget {
 
                 const SizedBox(width: AppSpacing.sm),
 
+                // --------------------------------------------------
+                // CHEVRON
+                // --------------------------------------------------
                 const Icon(
                   Icons.chevron_right_rounded,
                   size: 20,

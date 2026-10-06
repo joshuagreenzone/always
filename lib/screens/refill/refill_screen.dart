@@ -116,7 +116,6 @@ class _RefillScreenState extends State<RefillScreen> {
     });
 
     try {
-      // Verification must remain read-only.
       final bottle = await _refillService.verifyBottle(number);
 
       if (!mounted) return;
@@ -467,34 +466,36 @@ class _RefillScreenState extends State<RefillScreen> {
 
           Expanded(
             child: _batch.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.qr_code_scanner_rounded,
-                            size: 58,
-                            color: Colors.blueGrey.shade200,
-                          ),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'No bottles scanned yet',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF475569),
+                ? SingleChildScrollView(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.qr_code_scanner_rounded,
+                              size: 58,
+                              color: Colors.blueGrey.shade200,
                             ),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'Start scanning to add bottles to your '
-                            'temporary refill batch.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Color(0xFF64748B)),
-                          ),
-                        ],
+                            const SizedBox(height: 12),
+                            const Text(
+                              'No bottles scanned yet',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF475569),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Start scanning to add bottles to your '
+                              'temporary refill batch.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Color(0xFF64748B)),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   )
@@ -544,9 +545,6 @@ class _RefillScreenState extends State<RefillScreen> {
                   ),
           ),
 
-          // The bottom controls are laid out in a bounded-width
-          // Column. Avoid putting a full-width button directly
-          // inside a Row without Expanded or Flexible.
           Padding(
             padding: const EdgeInsets.all(AppSizes.screenPadding),
             child: SizedBox(
@@ -624,7 +622,7 @@ class _RefillScreenState extends State<RefillScreen> {
 
   Widget _buildScanner() {
     return SizedBox(
-      height: 280,
+      height: 220, // Reduced fixed height slightly to adapt to shorter screens
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -643,8 +641,8 @@ class _RefillScreenState extends State<RefillScreen> {
 
           Center(
             child: Container(
-              width: 230,
-              height: 170,
+              width: 200,
+              height: 140,
               decoration: BoxDecoration(
                 border: Border.all(color: const Color(0xFF38BDF8), width: 3),
                 borderRadius: BorderRadius.circular(20),
@@ -657,7 +655,7 @@ class _RefillScreenState extends State<RefillScreen> {
             left: 12,
             right: 12,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.75),
                 borderRadius: BorderRadius.circular(10),

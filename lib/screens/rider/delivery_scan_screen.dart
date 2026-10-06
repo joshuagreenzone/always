@@ -318,8 +318,7 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
         body: SafeArea(
           child: Column(
             children: [
-              // Compact order summary: avoid a large notice that
-              // consumes the available scanner preview height.
+              // Top compact summary
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                   AppSizes.screenPadding,
@@ -375,7 +374,7 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
                 ),
               ),
 
-              // The scanner occupies all remaining available height.
+              // Scanner view fills remaining flexible space
               Expanded(
                 child: ClipRect(
                   child: Stack(
@@ -389,8 +388,8 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
                       IgnorePointer(
                         child: Center(
                           child: Container(
-                            width: 250,
-                            height: 250,
+                            width: 220,
+                            height: 220,
                             decoration: BoxDecoration(
                               border: Border.all(color: Colors.white, width: 3),
                               borderRadius: BorderRadius.circular(16),
@@ -423,71 +422,83 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
                 ),
               ),
 
-              if (_scannedBottles.isNotEmpty)
-                SizedBox(
-                  height: 70,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSizes.screenPadding,
-                      vertical: 6,
-                    ),
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _scannedBottles.length,
-                    itemBuilder: (_, index) {
-                      final bottle = _scannedBottles[index];
+              // Bottom persistent bar with auto-fitting ListView
+              Container(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                padding: const EdgeInsets.only(top: 8, bottom: 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_scannedBottles.isNotEmpty)
+                      SizedBox(
+                        height: 58,
+                        child: ListView.builder(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSizes.screenPadding,
+                          ),
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _scannedBottles.length,
+                          itemBuilder: (_, index) {
+                            final bottle = _scannedBottles[index];
 
-                      return Container(
-                        margin: const EdgeInsets.only(right: AppSpacing.sm),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
+                            return Container(
+                              margin: const EdgeInsets.only(
+                                right: AppSpacing.sm,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: AppColors.success),
+                                borderRadius: BorderRadius.circular(
+                                  AppSizes.cardRadius,
+                                ),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(
+                                    Icons.check_circle,
+                                    color: AppColors.success,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    bottle.bottleNumber,
+                                    style: AppTextStyles.body,
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
                         ),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: AppColors.success),
-                          borderRadius: BorderRadius.circular(
-                            AppSizes.cardRadius,
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSizes.screenPadding,
+                        6,
+                        AppSizes.screenPadding,
+                        4,
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: canContinue
+                              ? _continueToConfirmation
+                              : null,
+                          child: Text(
+                            scanned == 0
+                                ? 'Scan at Least One Bottle'
+                                : allScanned
+                                ? 'Continue to Confirmation'
+                                : 'Continue with $scanned Bottle'
+                                      '${scanned == 1 ? '' : 's'}',
                           ),
                         ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.check_circle,
-                              color: AppColors.success,
-                              size: 20,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              bottle.bottleNumber,
-                              style: AppTextStyles.body,
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSizes.screenPadding,
-                  6,
-                  AppSizes.screenPadding,
-                  AppSizes.screenPadding,
-                ),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: canContinue ? _continueToConfirmation : null,
-                    child: Text(
-                      scanned == 0
-                          ? 'Scan at Least One Bottle'
-                          : allScanned
-                          ? 'Continue to Confirmation'
-                          : 'Continue with $scanned Bottle'
-                                '${scanned == 1 ? '' : 's'}',
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ],
