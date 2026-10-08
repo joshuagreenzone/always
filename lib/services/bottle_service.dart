@@ -20,6 +20,23 @@ class BottleBatchRegistrationException implements Exception {
   String toString() => message;
 }
 
+/// Result returned after registering a batch of bottles.
+///
+/// [registeredBottles] contains bottles that were newly inserted
+/// into the database.
+///
+/// [existingBottles] contains QR values that were already registered
+/// in the database and were therefore skipped.
+class BottleBatchRegistrationResult {
+  final List<BottleRegistration> registeredBottles;
+  final List<String> existingBottles;
+
+  const BottleBatchRegistrationResult({
+    required this.registeredBottles,
+    required this.existingBottles,
+  });
+}
+
 class BottleService {
   final ApiService _apiService = ApiService();
 
@@ -162,7 +179,11 @@ class BottleService {
     }
   }
 
-  Future<List<BottleRegistration>> registerBottlesBatch({
+  /// Registers a batch of bottles.
+  ///
+  /// Already-existing bottles are NOT treated as an error.
+  /// They are returned through [BottleBatchRegistrationResult.existingBottles].
+  Future<BottleBatchRegistrationResult> registerBottlesBatch({
     required int accId,
     required List<String> bottleNumbers,
     required int bottleTypeId,
@@ -203,6 +224,10 @@ class BottleService {
         );
       }
 
+      // ----------------------------------------------------------
+      // Newly registered bottles
+      // ----------------------------------------------------------
+
       final dynamic rawBottles = data['bottles'];
 
       if (rawBottles is! List) {
@@ -211,12 +236,35 @@ class BottleService {
         );
       }
 
-      return rawBottles
+      final registeredBottles = rawBottles
           .map(
             (json) =>
                 BottleRegistration.fromJson(Map<String, dynamic>.from(json)),
           )
           .toList();
+
+      // ----------------------------------------------------------
+      // Bottles that already existed in the database
+      // ----------------------------------------------------------
+
+      final dynamic rawExistingBottles = data['existingBottles'];
+
+      final List<String> existingBottles = [];
+
+      if (rawExistingBottles is List) {
+        for (final value in rawExistingBottles) {
+          final bottleNumber = value.toString().trim();
+
+          if (bottleNumber.isNotEmpty) {
+            existingBottles.add(bottleNumber);
+          }
+        }
+      }
+
+      return BottleBatchRegistrationResult(
+        registeredBottles: registeredBottles,
+        existingBottles: existingBottles,
+      );
     } on BottleBatchRegistrationException {
       rethrow;
     } on DioException catch (e) {
@@ -262,6 +310,12 @@ class BottleService {
 
     // ----------------------------------------------------------
     // Already registered
+    //
+    // This is kept as fallback handling in case another API
+    // endpoint still returns ALREADY_REGISTERED.
+    //
+    // The batch endpoint should now return existing bottles
+    // as a successful response instead.
     // ----------------------------------------------------------
 
     if (errorType == 'ALREADY_REGISTERED' &&
@@ -277,8 +331,7 @@ class BottleService {
               'Bottle "$bottleNumber" is already '
               'registered as $existingBottleType, '
               'but this batch is '
-              '$requestedBottleType.\n\n'
-              'Please remove this bottle from the batch.',
+              '$requestedBottleType.',
           bottleNumber: bottleNumber,
           errorType: errorType,
         );
@@ -288,18 +341,14 @@ class BottleService {
         return BottleBatchRegistrationException(
           message:
               'Bottle "$bottleNumber" is already '
-              'registered as $existingBottleType.\n\n'
-              'Please remove this bottle from the batch.',
+              'registered as $existingBottleType.',
           bottleNumber: bottleNumber,
           errorType: errorType,
         );
       }
 
       return BottleBatchRegistrationException(
-        message:
-            'Bottle "$bottleNumber" is already '
-            'registered.\n\n'
-            'Please remove this bottle from the batch.',
+        message: 'Bottle "$bottleNumber" is already registered.',
         bottleNumber: bottleNumber,
         errorType: errorType,
       );

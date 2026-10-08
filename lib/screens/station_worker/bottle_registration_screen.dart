@@ -20,19 +20,16 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
 
   final TextEditingController _brandController = TextEditingController();
 
-  final TextEditingController _costController = TextEditingController();
+  final TextEditingController _costController = TextEditingController(
+    text: '0.00',
+  );
 
   List<BottleType> _bottleTypes = [];
 
   final List<String> _scannedBottles = [];
 
-  // QR values that failed the last registration attempt.
-  //
-  // These bottles remain in _scannedBottles, but are displayed
-  // in red so the worker knows which bottles need attention.
   final Set<String> _errorBottles = <String>{};
 
-  // Stores the server's error message for each problematic QR.
   final Map<String, String> _bottleErrorMessages = <String, String>{};
 
   BottleType? _selectedBottleType;
@@ -85,12 +82,10 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
     setState(() {
       _selectedBottleType = value;
 
-      // Automatically use the bottle type's configured price.
-      // The worker can still manually change this value.
-      _costController.text = value.price.toStringAsFixed(2);
+      // Cost always starts at 0.00.
+      // The worker can manually change it.
+      _costController.text = '0.00';
 
-      // A change of bottle type means the previous validation
-      // errors should no longer be shown as active.
       _errorBottles.clear();
       _bottleErrorMessages.clear();
     });
@@ -107,39 +102,42 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
 
     if (_isRegistering) return;
 
-    final String? scannedValue = await Navigator.push<String>(
+    await Navigator.push<void>(
       context,
-      MaterialPageRoute(builder: (_) => const BottleRegistrationScanScreen()),
+      MaterialPageRoute(
+        builder: (_) =>
+            BottleRegistrationScanScreen(onScanned: _handleScannedBottle),
+      ),
     );
+  }
 
-    if (!mounted || scannedValue == null) return;
-
+  Future<bool> _handleScannedBottle(String scannedValue) async {
     final bottleNumber = scannedValue.trim();
 
-    if (bottleNumber.isEmpty) return;
+    if (bottleNumber.isEmpty) {
+      return false;
+    }
 
     final alreadyScanned = _scannedBottles.any(
       (value) => value.toLowerCase() == bottleNumber.toLowerCase(),
     );
 
     if (alreadyScanned) {
-      await _showErrorDialog(
-        'Duplicate Scan',
-        'Bottle "$bottleNumber" was already scanned '
-            'in this batch.\n\n'
-            'Please continue scanning another bottle or '
-            'remove the duplicate from the list.',
-      );
-      return;
+      return false;
+    }
+
+    if (!mounted) {
+      return false;
     }
 
     setState(() {
       _scannedBottles.add(bottleNumber);
 
-      // New bottles start without an error state.
       _errorBottles.remove(bottleNumber);
       _bottleErrorMessages.remove(bottleNumber);
     });
+
+    return true;
   }
 
   void _removeBottle(int index) {
@@ -150,7 +148,6 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
     setState(() {
       _scannedBottles.removeAt(index);
 
-      // Also remove its error state.
       _errorBottles.remove(bottleNumber);
       _bottleErrorMessages.remove(bottleNumber);
     });
@@ -298,8 +295,6 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
       return;
     }
 
-    // Clear previous error highlighting before starting
-    // a fresh server validation attempt.
     setState(() {
       _errorBottles.clear();
       _bottleErrorMessages.clear();
@@ -307,7 +302,7 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
     });
 
     try {
-      final registeredBottles = await _bottleService.registerBottlesBatch(
+      final result = await _bottleService.registerBottlesBatch(
         accId: widget.account.accId,
         bottleNumbers: List<String>.from(_scannedBottles),
         bottleTypeId: _selectedBottleType!.bottleTypeId,
@@ -318,12 +313,22 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
 
       if (!mounted) return;
 
-      /*
-       * IMPORTANT:
-       *
-       * Only clear the scanned list after the server confirms
-       * that the entire database transaction committed.
-       */
+      final registeredCount = result.registeredBottles.length;
+
+      final existingBottles = result.existingBottles;
+
+      // --------------------------------------------------------
+      // Remove all bottles from the current upload list.
+      //
+      // The API has already determined that:
+      //
+      // 1. Some were newly registered.
+      // 2. Some already existed and were skipped.
+      //
+      // Therefore nothing from this successful batch needs
+      // to remain in the current scan list.
+      // --------------------------------------------------------
+
       setState(() {
         _scannedBottles.clear();
         _errorBottles.clear();
@@ -331,18 +336,13 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
         _isRegistering = false;
       });
 
-      await _showSuccessDialog(registeredBottles.length);
+      await _showUploadResultDialog(
+        registeredCount: registeredCount,
+        existingBottles: existingBottles,
+      );
     } on BottleBatchRegistrationException catch (e) {
       if (!mounted) return;
 
-      /*
-       * IMPORTANT:
-       *
-       * The batch remains intact.
-       *
-       * Only the bottle identified by the server is marked
-       * as problematic.
-       */
       setState(() {
         _isRegistering = false;
 
@@ -363,9 +363,6 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
     } catch (e) {
       if (!mounted) return;
 
-      /*
-       * Unknown errors also keep the scanned batch intact.
-       */
       setState(() {
         _isRegistering = false;
       });
@@ -387,16 +384,91 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
     return null;
   }
 
-  Future<void> _showSuccessDialog(int count) async {
+  Future<void> _showUploadResultDialog({
+    required int registeredCount,
+    required List<String> existingBottles,
+  }) async {
+    final existingCount = existingBottles.length;
+
+    final bool hasExisting = existingCount > 0;
+
+    String summary;
+
+    if (registeredCount > 0 && existingCount > 0) {
+      summary =
+          '$registeredCount bottle(s) registered successfully.\n'
+          '$existingCount existing bottle(s) removed from the list.';
+    } else if (registeredCount > 0) {
+      summary = '$registeredCount bottle(s) registered successfully.';
+    } else if (existingCount > 0) {
+      summary =
+          'No new bottles were registered.\n'
+          '$existingCount existing bottle(s) removed from the list.';
+    } else {
+      summary = 'No bottles were registered.';
+    }
+
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Registration Successful'),
-          content: Text(
-            '$count bottle(s) were successfully '
-            'registered.',
+          title: const Row(
+            children: [
+              Icon(Icons.check_circle_outline, color: Colors.green),
+              SizedBox(width: 8),
+              Expanded(child: Text('Upload Complete')),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(summary),
+                if (hasExisting) ...[
+                  const SizedBox(height: 20),
+                  Text(
+                    'Existing Bottles Removed',
+                    style: Theme.of(context).textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.orange.withOpacity(0.4)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: existingBottles
+                          .map(
+                            (bottle) => Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('• '),
+                                  Expanded(
+                                    child: Text(
+                                      bottle,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
           actions: [
             FilledButton(
@@ -419,7 +491,10 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
 
     setState(() {
       _brandController.clear();
-      _costController.clear();
+
+      // Reset cost to 0.00 for the next batch.
+      _costController.text = '0.00';
+
       _selectedBottleType = null;
       _selectedCondition = 'BRAND_NEW';
     });

@@ -134,8 +134,7 @@ try {
 
     foreach ($bottles as $bottleNumber) {
 
-        $bottleNumber =
-            trim((string) $bottleNumber);
+        $bottleNumber = trim((string) $bottleNumber);
 
         if ($bottleNumber === '') {
             respond(
@@ -153,8 +152,7 @@ try {
             );
         }
 
-        $cleanBottleNumbers[] =
-            $bottleNumber;
+        $cleanBottleNumbers[] = $bottleNumber;
     }
 
     // ---------------------------------------------------------
@@ -165,8 +163,7 @@ try {
 
     foreach ($cleanBottleNumbers as $bottleNumber) {
 
-        $normalized =
-            mb_strtolower($bottleNumber);
+        $normalized = mb_strtolower($bottleNumber);
 
         if (isset($seen[$normalized])) {
 
@@ -175,12 +172,10 @@ try {
                 'The same bottle was scanned more than once in this batch.',
                 409,
                 [
-                    'errorType' =>
-                        'DUPLICATE_IN_BATCH',
+                    'errorType' => 'DUPLICATE_IN_BATCH',
 
                     'duplicateBottle' => [
-                        'bottleNumber' =>
-                            $bottleNumber
+                        'bottleNumber' => $bottleNumber
                     ]
                 ]
             );
@@ -214,8 +209,7 @@ try {
         ':accId' => $accId
     ]);
 
-    $account =
-        $accountStmt->fetch(PDO::FETCH_ASSOC);
+    $account = $accountStmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$account) {
         respond(
@@ -249,8 +243,7 @@ try {
     ");
 
     $typeStmt->execute([
-        ':bottleTypeId' =>
-            $bottleTypeId
+        ':bottleTypeId' => $bottleTypeId
     ]);
 
     $requestedBottleType =
@@ -268,10 +261,14 @@ try {
         $requestedBottleType['BottleType'];
 
     // ---------------------------------------------------------
-    // Server-side validation of EVERY QR.
+    // Find bottles that already exist.
     //
-    // Nothing is inserted until all QR values have passed
-    // validation.
+    // IMPORTANT:
+    //
+    // Existing bottles are NOT errors anymore.
+    //
+    // They are placed into $existingBottles and skipped.
+    // The rest of the batch continues normally.
     // ---------------------------------------------------------
 
     $existingBottleStmt = $db->prepare("
@@ -287,234 +284,232 @@ try {
         LIMIT 1
     ");
 
+    $existingBottles = [];
+
+    $newBottleNumbers = [];
+
     foreach ($cleanBottleNumbers as $bottleNumber) {
 
         $existingBottleStmt->execute([
-            ':bottleNumber' =>
-                $bottleNumber
+            ':bottleNumber' => $bottleNumber
         ]);
 
         $existingBottle =
-            $existingBottleStmt
-                ->fetch(PDO::FETCH_ASSOC);
+            $existingBottleStmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$existingBottle) {
+
+            $newBottleNumbers[] = $bottleNumber;
+
             continue;
         }
 
-        $existingBottleType =
-            $existingBottle['BottleType'];
-
         // -----------------------------------------------------
-        // Already registered under WRONG bottle type
-        // -----------------------------------------------------
-
-        if (
-            (int) $existingBottle['BottleTypeID'] !==
-            $bottleTypeId
-        ) {
-
-            respond(
-                false,
-                'Bottle is already registered under a different bottle type.',
-                409,
-                [
-                    'errorType' =>
-                        'ALREADY_REGISTERED',
-
-                    'bottle' => [
-                        'bottleId' =>
-                            (int) $existingBottle['BottleID'],
-
-                        'bottleNumber' =>
-                            $existingBottle['BottleNumber'],
-
-                        'bottleTypeId' =>
-                            (int) $existingBottle['BottleTypeID'],
-
-                        'bottleType' =>
-                            $existingBottleType
-                    ],
-
-                    'requestedBottleTypeId' =>
-                        $bottleTypeId,
-
-                    'requestedBottleType' =>
-                        $requestedBottleTypeName
-                ]
-            );
-        }
-
-        // -----------------------------------------------------
-        // Already registered under SAME bottle type
+        // Already registered.
+        //
+        // Regardless of whether the existing bottle has the
+        // same or different bottle type, skip it.
         // -----------------------------------------------------
 
-        respond(
-            false,
-            'Bottle is already registered.',
-            409,
-            [
-                'errorType' =>
-                    'ALREADY_REGISTERED',
+        $existingBottles[] = $existingBottle['BottleNumber'];
+    }
 
-                'bottle' => [
+    // ---------------------------------------------------------
+    // Register only NEW bottles.
+    // ---------------------------------------------------------
+
+    $registeredBottles = [];
+
+    // Only start a transaction when there are actually
+    // new bottles to insert.
+    if (count($newBottleNumbers) > 0) {
+
+        $db->beginTransaction();
+
+        try {
+
+            $insertStmt = $db->prepare("
+                INSERT INTO bottles
+                (
+                    BottleNumber,
+                    BottleTypeID,
+                    BottleBrand,
+                    BottleCondition,
+                    BottleCost,
+                    BottleRegDateTime
+                )
+                VALUES
+                (
+                    :bottleNumber,
+                    :bottleTypeId,
+                    :bottleBrand,
+                    :bottleCondition,
+                    :bottleCost,
+                    NOW()
+                )
+            ");
+
+            foreach ($newBottleNumbers as $bottleNumber) {
+
+                $insertStmt->execute([
+                    ':bottleNumber' => $bottleNumber,
+
+                    ':bottleTypeId' => $bottleTypeId,
+
+                    ':bottleBrand' =>
+                        $bottleBrand !== ''
+                            ? $bottleBrand
+                            : null,
+
+                    ':bottleCondition' =>
+                        $bottleCondition,
+
+                    ':bottleCost' =>
+                        round($bottleCost, 2)
+                ]);
+
+                $bottleId =
+                    (int) $db->lastInsertId();
+
+                $registeredBottles[] = [
                     'bottleId' =>
-                        (int) $existingBottle['BottleID'],
+                        $bottleId,
 
                     'bottleNumber' =>
-                        $existingBottle['BottleNumber'],
+                        $bottleNumber,
 
                     'bottleTypeId' =>
-                        (int) $existingBottle['BottleTypeID'],
+                        $bottleTypeId,
 
                     'bottleType' =>
-                        $existingBottleType
-                ],
+                        $requestedBottleTypeName,
 
-                'requestedBottleTypeId' =>
-                    $bottleTypeId,
+                    'bottleBrand' =>
+                        $bottleBrand !== ''
+                            ? $bottleBrand
+                            : null,
 
-                'requestedBottleType' =>
-                    $requestedBottleTypeName
-            ]
-        );
-    }
+                    'bottleCondition' =>
+                        $bottleCondition,
 
-    // ---------------------------------------------------------
-    // ALL bottles passed validation.
-    //
-    // Start ONE database transaction for the whole batch.
-    // ---------------------------------------------------------
+                    'bottleCost' =>
+                        round($bottleCost, 2),
 
-    $db->beginTransaction();
+                    'bottleRegDateTime' =>
+                        date('Y-m-d H:i:s')
+                ];
+            }
 
-    try {
+            $db->commit();
 
-        $insertStmt = $db->prepare("
-            INSERT INTO bottles
-            (
-                BottleNumber,
-                BottleTypeID,
-                BottleBrand,
-                BottleCondition,
-                BottleCost,
-                BottleRegDateTime
-            )
-            VALUES
-            (
-                :bottleNumber,
-                :bottleTypeId,
-                :bottleBrand,
-                :bottleCondition,
-                :bottleCost,
-                NOW()
-            )
-        ");
+        } catch (PDOException $e) {
 
-        $registeredBottles = [];
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
 
-        foreach ($cleanBottleNumbers as $bottleNumber) {
+            // -------------------------------------------------
+            // Database UNIQUE constraint is still the final
+            // protection against duplicate BottleNumber values.
+            //
+            // This could happen if another request registered
+            // the same QR after our initial check.
+            // -------------------------------------------------
 
-            $insertStmt->execute([
-                ':bottleNumber' =>
-                    $bottleNumber,
+            if (
+                isset($e->errorInfo[1]) &&
+                (int) $e->errorInfo[1] === 1062
+            ) {
+                respond(
+                    false,
+                    'A bottle in this batch was registered by another request. '
+                        . 'Please scan the bottle list again.',
+                    409,
+                    [
+                        'errorType' =>
+                            'DATABASE_DUPLICATE'
+                    ]
+                );
+            }
 
-                ':bottleTypeId' =>
-                    $bottleTypeId,
-
-                ':bottleBrand' =>
-                    $bottleBrand !== ''
-                        ? $bottleBrand
-                        : null,
-
-                ':bottleCondition' =>
-                    $bottleCondition,
-
-                ':bottleCost' =>
-                    round($bottleCost, 2)
-            ]);
-
-            $bottleId =
-                (int) $db->lastInsertId();
-
-            $registeredBottles[] = [
-                'bottleId' =>
-                    $bottleId,
-
-                'bottleNumber' =>
-                    $bottleNumber,
-
-                'bottleTypeId' =>
-                    $bottleTypeId,
-
-                'bottleType' =>
-                    $requestedBottleTypeName,
-
-                'bottleBrand' =>
-                    $bottleBrand !== ''
-                        ? $bottleBrand
-                        : null,
-
-                'bottleCondition' =>
-                    $bottleCondition,
-
-                'bottleCost' =>
-                    round($bottleCost, 2),
-
-                'bottleRegDateTime' =>
-                    date('Y-m-d H:i:s')
-            ];
-        }
-
-        // -----------------------------------------------------
-        // Entire batch inserted successfully.
-        // -----------------------------------------------------
-
-        $db->commit();
-
-        respond(
-            true,
-            'Bottles registered successfully.',
-            201,
-            [
-                'count' =>
-                    count($registeredBottles),
-
-                'bottles' =>
-                    $registeredBottles
-            ]
-        );
-
-    } catch (PDOException $e) {
-
-        if ($db->inTransaction()) {
-            $db->rollBack();
-        }
-
-        // Database UNIQUE constraint is still the final
-        // protection against duplicate BottleNumber values.
-        if (
-            isset($e->errorInfo[1]) &&
-            (int) $e->errorInfo[1] === 1062
-        ) {
             respond(
                 false,
-                'A bottle in this batch was registered by another request. '
-                    . 'Please check the scanned bottles and try again.',
-                409,
-                [
-                    'errorType' =>
-                        'DATABASE_DUPLICATE'
-                ]
+                'Database error while registering the bottle batch.',
+                500
             );
         }
-
-        respond(
-            false,
-            'Database error while registering the bottle batch.',
-            500
-        );
     }
+
+    // ---------------------------------------------------------
+    // Build response message.
+    // ---------------------------------------------------------
+
+    $registeredCount =
+        count($registeredBottles);
+
+    $existingCount =
+        count($existingBottles);
+
+    if (
+        $registeredCount > 0 &&
+        $existingCount > 0
+    ) {
+
+        $message =
+            $registeredCount
+            . ' bottle(s) registered successfully. '
+            . $existingCount
+            . ' existing bottle(s) were skipped.';
+
+    } elseif ($registeredCount > 0) {
+
+        $message =
+            $registeredCount
+            . ' bottle(s) registered successfully.';
+
+    } elseif ($existingCount > 0) {
+
+        $message =
+            'All scanned bottles were already registered. '
+            . $existingCount
+            . ' existing bottle(s) were skipped.';
+
+    } else {
+
+        $message =
+            'No new bottles were registered.';
+    }
+
+    // ---------------------------------------------------------
+    // Successful response.
+    //
+    // "bottles" = newly registered bottles
+    //
+    // "existingBottles" = bottles already in the database
+    // and skipped from registration
+    // ---------------------------------------------------------
+
+    respond(
+        true,
+        $message,
+        200,
+        [
+            'registeredCount' =>
+                $registeredCount,
+
+            'existingCount' =>
+                $existingCount,
+
+            'count' =>
+                $registeredCount,
+
+            'bottles' =>
+                $registeredBottles,
+
+            'existingBottles' =>
+                $existingBottles
+        ]
+    );
 
 } catch (PDOException $e) {
 
