@@ -1,36 +1,38 @@
-import 'dart:convert';
-
-import 'package:http/http.dart' as http;
+import 'package:dio/dio.dart';
 
 import '../models/rider_transaction.dart';
+import 'api_service.dart';
 
 class RiderTransactionService {
-  static const String baseUrl =
-      'http://192.168.1.76/fluttercodes/syawla/syawla_api/api/rider';
+  final ApiService _apiService = ApiService();
 
   Future<List<RiderTransaction>> getTransactionHistory(int accId) async {
-    final url = Uri.parse('$baseUrl/get_transaction_history.php?accId=$accId');
-
-    final response = await http.get(url);
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load transaction history.');
-    }
-
-    final data = jsonDecode(response.body);
-
-    if (data['success'] != true) {
-      throw Exception(
-        data['message']?.toString() ?? 'Failed to load transactions.',
+    try {
+      final response = await _apiService.dio.get(
+        'api/rider/get_transaction_history.php',
+        queryParameters: {'accId': accId},
       );
+
+      final data = response.data;
+
+      if (data['success'] != true) {
+        throw Exception(
+          data['message']?.toString() ?? 'Failed to load transactions.',
+        );
+      }
+
+      final List transactions = data['data'] ?? [];
+
+      return transactions
+          .map(
+            (item) =>
+                RiderTransaction.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList();
+    } on DioException catch (e) {
+      throw Exception(e.message ?? 'Failed to load transaction history.');
+    } catch (e) {
+      throw Exception(e.toString().replaceFirst('Exception: ', ''));
     }
-
-    final List transactions = data['data'] ?? [];
-
-    return transactions
-        .map(
-          (item) => RiderTransaction.fromJson(Map<String, dynamic>.from(item)),
-        )
-        .toList();
   }
 }
