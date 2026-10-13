@@ -293,7 +293,7 @@ try {
             BottleNumber,
             BottleTypeID,
             BottleBrand,
-            BottleCondition,
+            BottleAcquisition,
             BottleCost,
             BottleRegDateTime
         )

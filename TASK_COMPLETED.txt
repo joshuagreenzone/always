@@ -1,0 +1,208 @@
+Task Completed: Repository Contributor Guide
+Date: 2026-10-12
+
+Created AGENTS.md with the title "Repository Guidelines".
+
+The guide covers:
+- Flutter application and PHP/MySQL API structure.
+- Development, build, formatting, analysis, and test commands.
+- Coding style and naming conventions.
+- Testing expectations and the existing stale widget test.
+- Commit and pull request guidelines based on recent Git history.
+- Local API and database configuration, including the missing SQL schema.
+
+Validation:
+- Confirmed the guide contains 385 words, within the requested 200-400 range.
+- Reviewed the content against repository files and recent commits.
+- Ran git diff --check; no whitespace errors were reported.
+
+Application tests were not run because this task only added documentation.
+
+Task Completed: Missing and Damaged Bottle Scanning
+Date: 2026-10-12
+
+- Added state checks to rider delivery/pickup and station-worker refill/registration scans.
+- Missing or damaged bottles prompt the scanner to update the state or skip the bottle.
+- State updates require a note and record the previous/new state, staff account,
+  and database-server update date/time in bottle_condition_history.
+- Updates save immediately; damaged bottles may be picked up but cannot be
+  refilled or delivered. Missing bottles need a state change before processing.
+- Added API validation, transactional history writes, and stale-update protection.
+- Batch confirmation rechecks bottle state under a database row lock.
+- Corrected bottle registration to store acquisition in BottleAcquisition.
+- Added and applied the local history migration. Other database installations
+  need syawla_api/migrations/20261012_bottle_condition_history.sql.
+- Replaced the stale starter widget test with a login validation test.
+
+Validation:
+- All 15 Flutter tests passed.
+- PHP syntax checks passed for all changed and added PHP files.
+- Database integration checks passed; all fixture changes were rolled back.
+- Verified the running API reports the existing missing bottle correctly.
+- Flutter analysis: no errors; 66 existing warnings/deprecation/lint notices remain.
+- Device camera scanning still requires manual verification.
+
+Follow-up Completed: Damaged Pickup and Recovery Refill Rules
+Date: 2026-10-12
+
+- Damaged bottles can be picked up while retaining the damaged state.
+- Refill and delivery reject missing/damaged bottles.
+- Restoring a missing/damaged bottle to healthy requires a fresh refill before
+  delivery; old refills are invalidated by a recorded refill cutoff.
+- The replacement refill is allowed for bottles last refilled at the station;
+  duplicate refills and outstanding outward activity remain checked.
+- Delivery checks run during scanning and again at confirmation.
+- Applied 20261012_bottle_recovery_refill.sql to the local database.
+
+Follow-up validation:
+- All 21 Flutter tests passed.
+- PHP syntax and database integration checks passed; fixtures were rolled back.
+- Analysis reports the same 66 existing warnings/lint notices and no errors.
+- Verified the API retains WG-0002 as DAMAGED.
+- Device camera scanning still requires manual verification.
+
+Task Completed: Rider Loading and Station Return Scans
+Date: 2026-10-12
+
+Cycle labels:
+1. Ready for Loading
+2. Loaded for Delivery
+3. Delivered to Customer
+4. Collected from Customer
+5. Returned to Station
+
+- Added Load for Delivery and Return to Station actions to the rider dashboard.
+- Vehicle inventory and confirmed return counts are tracked per rider.
+- Loading requires a healthy refilled bottle; delivery requires a confirmed
+  loading scan by the same rider.
+- Station return requires a confirmed customer pickup by that rider.
+- Damaged bottles may return while remaining damaged; refill/delivery stay blocked.
+- Collected bottles cannot be refilled before their station-return scan.
+- Scans stay temporary until confirmation. All batch records and cycle updates
+  commit together, with validation repeated under bottle row locks.
+- Applied 20261012_vehicle_bottle_cycle.sql locally, preserving legacy activity.
+- Updated ready-stock inventory to use the current cycle.
+
+Validation:
+- All 24 Flutter tests passed.
+- Bottle cycle and condition database checks passed; fixtures were rolled back.
+- PHP syntax checks passed and the running inventory APIs returned valid results.
+- Flutter analysis has no errors; the same 66 existing warning/lint notices remain.
+- Device camera scanning still requires manual verification.
+
+Follow-up Completed: Vehicle Events in Bottle Scan History
+Date: 2026-10-12
+
+- Added LOAD_SCAN and UNLOAD_SCAN to bottle_scan_event.EventType.
+- Each confirmed loading or station-return bottle records its rider, date/time,
+  and related refill or pickup/delivery references in bottle_scan_event.
+- Event inserts, vehicle batch records, and cycle updates share one transaction.
+  Temporary scans and rejected batches do not create scan events.
+- Applied 20261012_vehicle_scan_event_types.sql to the local database.
+
+Validation:
+- PHP syntax checks passed for the changed service and test.
+- Cycle integration checks passed, including event types, actor, timestamps,
+  pickup references, rejected batches, and repeated trips; fixtures rolled back.
+- Bottle condition integration checks passed; fixtures rolled back.
+
+Follow-up Completed: Use Scan Events for Current Bottle Status
+Date: 2026-10-12
+
+- Loading, delivery, pickup, station return, and refill validation now derive
+  the current stage from scan history instead of a potentially stale cycle row.
+- REFILL_SCAN maps to Ready for Loading; delivery/pickup/load/unload events
+  map to their corresponding bottle stages. Inventories use the same logic.
+- Preserve newer station-counter movements and existing condition/recovery rules.
+- Backfilled one previously confirmed vehicle load locally with its original
+  rider and date/time; repeat migration added no duplicate events.
+- Duplicate loading reports that the bottle is already Loaded for Delivery.
+
+Validation:
+- PHP syntax and condition/cycle database integration checks passed.
+- Regression checks cover absent/stale snapshots, event-only delivery/pickup,
+  and backdated history; all test fixtures were rolled back.
+- Running API accepted A-0044 for loading and retained A-0042 as already loaded.
+
+Task Completed: Station Return Validation and Scanner UI
+Date: 2026-10-12
+
+- Station return uses the latest PICKUP_SCAN without depending on a cycle row.
+- Older pickup-header events resolve the bottle's matching pickup detail.
+- Rider ownership and damaged-return rules remain enforced.
+- Added specific errors for no pickup, another rider's pickup, missing records,
+  and bottles already returned to the station.
+- Redesigned both vehicle scanning screens with separate scanned/confirmed lists,
+  clear instructions, fixed confirmation buttons, readable dates, and empty states.
+- Added manual bottle-number entry using the same validation as camera scans.
+- Success messages distinguish adding a bottle from confirming its arrival.
+- Failed saves retain the scanned list; refresh errors preserve known counts.
+- Repeated camera detections do not repeatedly add a bottle or flood errors.
+
+Validation:
+- All 28 Flutter tests passed, including successful return confirmation,
+  rejected scans, failed-save retry, and small-screen layout with larger text.
+- Analyzer found no issues in the changed scanner and test files.
+- PHP syntax and both database integration checks passed; fixtures rolled back.
+- Live API accepted picked-up A-0010 for return and explained why A-0044
+  must be picked up first. No live bottles were returned by these read-only checks.
+- Camera scanning still requires verification on a device.
+
+Task Completed: Uniform Bottle Scanning UI and Batch Location Reuse
+Date: 2026-10-13
+
+- Unified registration, refill, delivery, pickup, vehicle loading, and station
+  return camera views using bottle registration as the benchmark.
+- Added a shared QR-only scanner with full-preview detection, a visual frame,
+  scan feedback, torch control, camera switching, and camera retry handling.
+- Matched registration's 100 ms detection setting and 350 ms scan cooldown.
+- Removed per-bottle camera restarts and success dialogs from delivery/pickup,
+  and removed refill's longer scan delays for continuous scanning.
+- Prevented overlapping scans and suppressed repeated QR detections.
+- Delivery and pickup reuse one GPS fix across the batch. Refill obtains one
+  fix when saving and reuses it if saving the same batch must be retried.
+- Failed location requests can be retried; ending or clearing a batch resets
+  its cached location. Vehicle scans retain their existing location behavior.
+- Preserved bottle-condition checks, workflow validation, payment flows,
+  confirmation steps, and existing API payloads. No backend files were changed
+  as part of this task.
+
+Validation:
+- All 33 Flutter tests passed, including new scanner and batch-location tests.
+- Regression coverage checks overlapping scans, duplicate suppression, QR-only
+  detection, disabled scanning, small scanner layouts, shared GPS requests,
+  failed-location retries, and fresh location acquisition for a new batch.
+- Flutter analysis reports no errors; 61 existing warning/lint notices remain.
+- Formatted changed Dart files and ran git diff --check without whitespace errors.
+- Camera speed, GPS behavior, and affected scanning/payment flows still require
+  manual verification on a phone against the development API.
+
+Task Completed: Rider Scan Cards and On-Demand Inventory Lists
+Date: 2026-10-13
+
+- Matched delivery and pickup to the loading screen's card layout: order details
+  at the top, scanner card, current pending bottles, and a fixed confirm button.
+- Order cards show customer, bottle types, quantities, progress, and remaining
+  bottles. Pickup now displays all bottle types in the order.
+- Added shared rider scan cards and pending-bottle lists for consistent spacing.
+- Loading and station return main screens show bottles scanned for the current
+  batch, with existing removal and confirmation behavior preserved.
+- Added View Loaded Bottles and View Return Inventory buttons. Existing inventory
+  and recent station-return history open in a scrollable bottom sheet.
+- Paused scan processing while the inventory sheet is open.
+- Removed the Scanned bottles (0/200) headings from loading and station return;
+  retained the existing batch limit and count on the confirmation button.
+- Removed Stop Camera from the active station-return scanner. Start Scanning
+  remains available before the camera starts or if startup fails.
+- Preserved backend logic, scan checks, batch-location reuse, confirmation,
+  partial delivery/pickup, and payment flows.
+
+Validation:
+- All 35 Flutter tests passed.
+- Updated inventory tests for on-demand lists, pending scans, save failures,
+  confirmation, and small-screen layouts.
+- Added delivery/pickup layout checks at 320x568 with larger text, including
+  fixed disabled confirmation buttons before scanning and multiple pickup types.
+- Flutter analysis: no errors in changed files; 61 existing project notices remain.
+- Formatted changed Dart files; git diff --check found no whitespace errors.
+- Live camera scanning and payment flows still require phone verification.

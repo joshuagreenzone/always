@@ -3,6 +3,8 @@
 header('Content-Type: application/json');
 
 require_once '../../config/database.php';
+require_once __DIR__ . '/../../services/bottle_condition.php';
+require_once __DIR__ . '/../../services/bottle_cycle.php';
 
 $db = null;
 
@@ -197,6 +199,7 @@ try {
     }
 
     $bottleId = (int) $bottle['BottleID'];
+    requireHealthyBottle($db, $bottleId, true);
 
     /*
      * ---------------------------------------------------------
@@ -415,6 +418,8 @@ try {
     $db->beginTransaction();
 
     try {
+        requireHealthyBottle($db, $bottleId, true);
+        requireBottlePickupCycle($db, $bottleId, $accId, (int) $delivered['ODTID']);
 
         /*
          * Create pickup session if one does not already exist.
@@ -482,6 +487,7 @@ try {
         ]);
 
         $dptId = (int) $db->lastInsertId();
+        setBottleCycle($db, $bottleId, 'COLLECTED', $accId, null, (int) $delivered['ODTID'], $dptId);
 
         /*
          * -----------------------------------------------------
@@ -651,6 +657,12 @@ try {
         ]
     ]);
 
+} catch (BottleConditionConflict $e) {
+    if ($db !== null && $db->inTransaction()) {
+        $db->rollBack();
+    }
+    http_response_code(409);
+    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 } catch (PDOException $e) {
 
     if ($db !== null && $db->inTransaction()) {

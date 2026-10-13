@@ -105,8 +105,10 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            BottleRegistrationScanScreen(onScanned: _handleScannedBottle),
+        builder: (_) => BottleRegistrationScanScreen(
+          onScanned: _handleScannedBottle,
+          account: widget.account,
+        ),
       ),
     );
   }

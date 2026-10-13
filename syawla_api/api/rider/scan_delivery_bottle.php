@@ -3,6 +3,8 @@
 header('Content-Type: application/json');
 
 require_once '../../config/database.php';
+require_once __DIR__ . '/../../services/bottle_condition.php';
+require_once __DIR__ . '/../../services/bottle_cycle.php';
 
 $db = null;
 
@@ -212,6 +214,8 @@ try {
     }
 
     $bottleId = (int) $bottle['BottleID'];
+    requireBottleReadyForDelivery($db, $bottleId);
+    requireLoadedBottle($db, $bottleId, $accId);
 
     /*
      * ---------------------------------------------------------
@@ -575,6 +579,8 @@ try {
     $db->beginTransaction();
 
     try {
+        requireBottleReadyForDelivery($db, $bottleId);
+        $loadedCycle = requireLoadedBottle($db, $bottleId, $accId);
 
         /*
          * Insert the delivery transaction.
@@ -657,6 +663,7 @@ try {
         ]);
 
         $scanEventId = (int) $db->lastInsertId();
+        setBottleCycle($db, $bottleId, 'DELIVERED', $accId, (int) $loadedCycle['RefillID'], $odtId);
 
         /*
          * Both inserts succeeded.
@@ -704,6 +711,12 @@ try {
         ]
     ]);
 
+} catch (BottleConditionConflict $e) {
+    if ($db !== null && $db->inTransaction()) {
+        $db->rollBack();
+    }
+    http_response_code(409);
+    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 } catch (PDOException $e) {
 
     http_response_code(500);

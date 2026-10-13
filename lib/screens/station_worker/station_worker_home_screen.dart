@@ -137,7 +137,7 @@ class StationWorkerHomeScreen extends StatelessWidget {
                 _DashboardCard(
                   icon: Icons.format_list_bulleted_rounded,
                   iconColor: const Color(0xFFD97706),
-                  title: 'Refilled Bottles',
+                  title: 'Ready for Loading',
                   description: 'View bottles currently ready for delivery.',
                   onTap: () {
                     Navigator.push(

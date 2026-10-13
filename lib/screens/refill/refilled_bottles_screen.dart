@@ -89,7 +89,7 @@ class _RefilledBottlesScreenState extends State<RefilledBottlesScreen> {
       backgroundColor: const Color(0xFFF4F6F9),
       appBar: AppBar(
         title: const Text(
-          'Refilled Bottles',
+          'Ready for Loading',
           style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.3),
         ),
         elevation: 0,
@@ -237,7 +237,7 @@ class _RefilledBottlesScreenState extends State<RefilledBottlesScreen> {
           const SizedBox(height: AppSpacing.md),
 
           const Text(
-            'No Refilled Bottles Ready',
+            'No Bottles Ready for Loading',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 18,
@@ -251,7 +251,7 @@ class _RefilledBottlesScreenState extends State<RefilledBottlesScreen> {
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: AppSpacing.xl),
             child: Text(
-              'Bottles ready for delivery will appear here after being refilled.',
+              'Healthy, refilled bottles will appear here until loaded for delivery.',
               style: TextStyle(fontSize: 14, color: Color(0xFF64748B)),
               textAlign: TextAlign.center,
             ),

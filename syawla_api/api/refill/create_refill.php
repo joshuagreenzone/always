@@ -4,6 +4,8 @@
 header("Content-Type: application/json");
 
 require_once "../../config/database.php";
+require_once __DIR__ . '/../../services/bottle_condition.php';
+require_once __DIR__ . '/../../services/bottle_cycle.php';
 
 function respond(int $status, array $payload): void
 {
@@ -130,6 +132,8 @@ try {
             }
 
             $bottleId = (int)$bottle["BottleID"];
+            requireHealthyBottle($db, $bottleId);
+            $atStationReturn = requireBottleAtStationForRefill($db, $bottleId);
 
             // Get latest refill.
             $stmt = $db->prepare("
@@ -145,6 +149,8 @@ try {
             ]);
 
             $latestRefill = $stmt->fetch(PDO::FETCH_ASSOC);
+            $needsRecoveryRefill = bottleNeedsRecoveryRefill($db, $bottleId);
+            $allowedByRecovery = $atStationReturn || canRefillRecoveredBottle($db, $bottleId, $latestRefill);
 
             // Get latest premise movement.
             $stmt = $db->prepare("
@@ -193,7 +199,7 @@ try {
              * No movement and no pickup scan:
              * permit a first refill only for a genuinely new bottle.
              */
-            if (!$latestMovement && !$allowedByPickupScan) {
+            if (!$latestMovement && !$allowedByPickupScan && !$allowedByRecovery) {
                 $stmt = $db->prepare("
                     SELECT COUNT(*)
                     FROM order_delivery_transaction
@@ -213,7 +219,7 @@ try {
                         . "No records were saved."
                     );
                 }
-            } elseif (!$allowedByMovement && !$allowedByPickupScan) {
+            } elseif (!$allowedByMovement && !$allowedByPickupScan && !$allowedByRecovery) {
                 throw new DomainException(
                     "Bottle {$bottleNumber} is not eligible for refill. "
                     . "Its latest premise movement is not RETURN and "
@@ -225,6 +231,8 @@ try {
             // Prevent duplicate refill after the latest RETURN movement.
             if (
                 $allowedByMovement &&
+                !$needsRecoveryRefill &&
+                !$atStationReturn &&
                 $latestRefill &&
                 strtotime($latestRefill["RefillDateTime"]) >=
                 strtotime($latestMovement["MovementDateTime"])
@@ -242,6 +250,8 @@ try {
             if (
                 !$allowedByMovement &&
                 $allowedByPickupScan &&
+                !$needsRecoveryRefill &&
+                !$atStationReturn &&
                 $latestRefill &&
                 strtotime($latestRefill["RefillDateTime"]) >=
                 strtotime($latestScanEvent["ScanDateTime"])
@@ -269,6 +279,7 @@ try {
             ]);
 
             $refillId = (int)$db->lastInsertId();
+            setBottleCycle($db, $bottleId, 'READY', null, $refillId);
 
             // Save refill audit event.
             $stmt = $db->prepare("

@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
+
+import '../../services/batch_scan_location.dart';
+import '../../widgets/common/bottle_scanner_view.dart';
+
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../models/account.dart';
 import '../../models/bottle.dart';
 import '../../services/refill_service.dart';
+import '../../widgets/common/bottle_condition_dialog.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
@@ -20,8 +24,10 @@ class RefillScreen extends StatefulWidget {
 
 class _RefillScreenState extends State<RefillScreen> {
   final RefillService _refillService = RefillService();
-  final MobileScannerController _scannerController = MobileScannerController();
+  final MobileScannerController _scannerController =
+      createBottleScannerController();
 
+  final _batchLocation = BatchScanLocation();
   final List<Bottle> _batch = [];
   final Set<String> _batchNumbers = {};
 
@@ -49,35 +55,6 @@ class _RefillScreenState extends State<RefillScreen> {
     });
   }
 
-  Future<Position> _getCurrentLocation() async {
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-
-    if (!serviceEnabled) {
-      throw Exception(
-        'Location services are turned off. '
-        'Please enable GPS and try again.',
-      );
-    }
-
-    LocationPermission permission = await Geolocator.checkPermission();
-
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      throw Exception(
-        'Location permission is required to save the refill batch. '
-        'Please enable location access in your device settings.',
-      );
-    }
-
-    return Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-    );
-  }
-
   Future<void> _handleQrCode(String value) async {
     final number = value.trim();
 
@@ -89,25 +66,10 @@ class _RefillScreenState extends State<RefillScreen> {
       return;
     }
 
-    _scanLocked = true;
-
-    if (_batchNumbers.contains(number)) {
-      setState(() {
-        _lastScannedNumber = number;
-        _errorMessage = 'Bottle $number is already in this batch.';
-      });
-
-      await Future.delayed(const Duration(milliseconds: 1000));
-
-      if (mounted && _isScanning) {
-        setState(() {
-          _errorMessage = null;
-          _scanLocked = false;
-        });
-      }
-
+    if (_batchNumbers.any((n) => n.toLowerCase() == number.toLowerCase())) {
       return;
     }
+    _scanLocked = true;
 
     setState(() {
       _isVerifying = true;
@@ -116,6 +78,16 @@ class _RefillScreenState extends State<RefillScreen> {
     });
 
     try {
+      final ready = await checkBottleConditionForScan(
+        context: context,
+        accId: widget.account.accId,
+        bottleNumber: number,
+      );
+      if (!mounted) return;
+      if (!ready) {
+        setState(() => _errorMessage = 'Bottle not added');
+        return;
+      }
       final bottle = await _refillService.verifyBottle(number);
 
       if (!mounted) return;
@@ -150,8 +122,6 @@ class _RefillScreenState extends State<RefillScreen> {
         setState(() {
           _isVerifying = false;
         });
-
-        await Future.delayed(const Duration(milliseconds: 900));
 
         if (mounted && _isScanning) {
           setState(() {
@@ -214,7 +184,7 @@ class _RefillScreenState extends State<RefillScreen> {
     });
 
     try {
-      final position = await _getCurrentLocation();
+      final position = await _batchLocation.get();
 
       final result = await _refillService.createRefillBatch(
         accId: widget.account.accId,
@@ -232,6 +202,7 @@ class _RefillScreenState extends State<RefillScreen> {
 
       setState(() {
         _batch.clear();
+        _batchLocation.clear();
         _batchNumbers.clear();
         _lastScannedNumber = null;
         _isSaving = false;
@@ -299,6 +270,7 @@ class _RefillScreenState extends State<RefillScreen> {
     setState(() {
       _batch.remove(bottle);
       _batchNumbers.remove(bottle.bottleNumber.trim());
+      if (_batch.isEmpty) _batchLocation.clear();
     });
   }
 
@@ -332,6 +304,7 @@ class _RefillScreenState extends State<RefillScreen> {
 
     setState(() {
       _batch.clear();
+      _batchLocation.clear();
       _batchNumbers.clear();
       _errorMessage = null;
       _lastScannedNumber = null;
@@ -381,7 +354,7 @@ class _RefillScreenState extends State<RefillScreen> {
         children: [
           if (_isScanning) _buildScanner(),
 
-          if (_errorMessage != null)
+          if (_errorMessage != null && !_isScanning)
             Container(
               width: double.infinity,
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -620,79 +593,19 @@ class _RefillScreenState extends State<RefillScreen> {
     );
   }
 
-  Widget _buildScanner() {
-    return SizedBox(
-      height: 220, // Reduced fixed height slightly to adapt to shorter screens
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          MobileScanner(
-            controller: _scannerController,
-            onDetect: (capture) {
-              if (capture.barcodes.isEmpty) return;
-
-              final value = capture.barcodes.first.rawValue;
-
-              if (value != null && value.trim().isNotEmpty) {
-                _handleQrCode(value);
-              }
-            },
-          ),
-
-          Center(
-            child: Container(
-              width: 200,
-              height: 140,
-              decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFF38BDF8), width: 3),
-                borderRadius: BorderRadius.circular(20),
-              ),
-            ),
-          ),
-
-          Positioned(
-            top: 12,
-            left: 12,
-            right: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.75),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                _isVerifying
-                    ? 'Verifying $_lastScannedNumber...'
-                    : 'Scan the next bottle • '
-                          '${_batch.length} verified',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-
-          Positioned(
-            bottom: 12,
-            left: 12,
-            right: 12,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.65),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'Keep scanning. Press Stop Scanning when finished.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white, fontSize: 12),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildScanner() => SizedBox(
+    height: (MediaQuery.sizeOf(context).height * .38).clamp(180.0, 320.0),
+    child: BottleScannerView(
+      controller: _scannerController,
+      busy: _isVerifying,
+      enabled: _isScanning && !_isSaving,
+      message:
+          _errorMessage ??
+          (_lastScannedNumber == null || _isVerifying
+              ? null
+              : 'Scanned\n$_lastScannedNumber'),
+      success: _errorMessage == null,
+      onDetect: (capture) => _handleQrCode(capture.barcodes.first.rawValue!),
+    ),
+  );
 }

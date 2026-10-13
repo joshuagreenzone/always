@@ -3,6 +3,8 @@
 header('Content-Type: application/json');
 
 require_once '../../config/database.php';
+require_once __DIR__ . '/../../services/bottle_condition.php';
+require_once __DIR__ . '/../../services/bottle_cycle.php';
 
 $db = null;
 
@@ -430,6 +432,8 @@ try {
             }
 
             $bottleId = (int) $bottle['BottleID'];
+            requireBottleReadyForDelivery($db, $bottleId);
+            $loadedCycle = requireLoadedBottle($db, $bottleId, $accId);
             $bottleTypeId = (int) $bottle['BottleTypeID'];
 
             /*
@@ -530,6 +534,7 @@ try {
                 'scanEventId' => (int) $db->lastInsertId()
             ];
 
+            setBottleCycle($db, $bottleId, 'DELIVERED', $accId, (int) $loadedCycle['RefillID'], $odtId);
             if (!isset($deliveredItemCounts[$matchedOrderItemId])) {
                 $deliveredItemCounts[$matchedOrderItemId] = 0;
             }

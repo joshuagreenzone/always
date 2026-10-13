@@ -12,6 +12,7 @@ import '../login/login_screen.dart';
 import 'assigned_orders_screen.dart';
 import 'pickup_orders_screen.dart';
 import 'transaction_history_screen.dart';
+import 'vehicle_scan_screen.dart';
 
 class RiderHomeScreen extends StatelessWidget {
   final Account account;
@@ -98,6 +99,20 @@ class RiderHomeScreen extends StatelessWidget {
                 ),
 
                 _DashboardCard(
+                  icon: Icons.inventory_2_outlined,
+                  iconColor: const Color(0xFF0284C7),
+                  title: 'Load for Delivery',
+                  description: 'Scan ready bottles into your delivery vehicle.',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          VehicleScanScreen(account: account, returning: false),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _DashboardCard(
                   icon: Icons.local_shipping_rounded,
                   iconColor: const Color(0xFF0284C7),
                   title: 'Assigned Orders',
@@ -131,6 +146,20 @@ class RiderHomeScreen extends StatelessWidget {
 
                 const SizedBox(height: AppSpacing.md),
 
+                _DashboardCard(
+                  icon: Icons.warehouse_outlined,
+                  iconColor: const Color(0xFF059669),
+                  title: 'Return to Station',
+                  description: 'Scan collected bottles out of your vehicle at the station.',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          VehicleScanScreen(account: account, returning: true),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
                 _DashboardCard(
                   icon: Icons.history_rounded,
                   iconColor: const Color(0xFF6366F1),

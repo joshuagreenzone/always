@@ -4,6 +4,8 @@
 header('Content-Type: application/json');
 
 require_once '../../config/database.php';
+require_once __DIR__ . '/../../services/bottle_condition.php';
+require_once __DIR__ . '/../../services/bottle_cycle.php';
 
 $db = null;
 
@@ -379,6 +381,7 @@ try {
         }
 
         $bottleId = (int) $bottle['BottleID'];
+        requireHealthyBottle($db, $bottleId, true);
 
         /*
          * Confirm that this bottle was delivered on this delivery.
@@ -399,6 +402,7 @@ try {
         }
 
         $odtId = (int) $odt['ODTID'];
+        requireBottlePickupCycle($db, $bottleId, $accId, $odtId);
 
         /*
          * Prevent duplicate pickup.
@@ -447,6 +451,7 @@ try {
             'dptId' => $dptId,
             'odtId' => $odtId
         ];
+        setBottleCycle($db, $bottleId, 'COLLECTED', $accId, null, $odtId, $dptId);
     }
 
     if (count($confirmedBottles) === 0) {

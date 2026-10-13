@@ -4,6 +4,8 @@
 header("Content-Type: application/json");
 
 require_once "../../config/database.php";
+require_once __DIR__ . '/../../services/bottle_condition.php';
+require_once __DIR__ . '/../../services/bottle_cycle.php';
 
 function respond(int $status, array $payload): void
 {
@@ -55,6 +57,8 @@ try {
     }
 
     $bottleId = (int)$bottle["BottleID"];
+    requireHealthyBottle($db, $bottleId);
+    $atStationReturn = requireBottleAtStationForRefill($db, $bottleId);
 
     // Get the latest refill.
     $stmt = $db->prepare("
@@ -70,6 +74,8 @@ try {
     ]);
 
     $latestRefill = $stmt->fetch(PDO::FETCH_ASSOC);
+    $needsRecoveryRefill = bottleNeedsRecoveryRefill($db, $bottleId);
+    $allowedByRecovery = $atStationReturn || canRefillRecoveredBottle($db, $bottleId, $latestRefill);
 
     // Get the latest premise movement.
     $stmt = $db->prepare("
@@ -118,7 +124,7 @@ try {
      * No movement history and no pickup scan:
      * Allow a first refill only for a genuinely new bottle.
      */
-    if (!$latestMovement && !$allowedByPickupScan) {
+    if (!$latestMovement && !$allowedByPickupScan && !$allowedByRecovery) {
         $stmt = $db->prepare("
             SELECT COUNT(*)
             FROM order_delivery_transaction
@@ -157,7 +163,7 @@ try {
      * A bottle with history must satisfy at least one of the two
      * eligibility conditions.
      */
-    if (!$allowedByMovement && !$allowedByPickupScan) {
+    if (!$allowedByMovement && !$allowedByPickupScan && !$allowedByRecovery) {
         respond(409, [
             "success" => false,
             "message" =>
@@ -176,6 +182,8 @@ try {
      */
     if (
         $allowedByMovement &&
+        !$needsRecoveryRefill &&
+        !$atStationReturn &&
         $latestRefill &&
         strtotime($latestRefill["RefillDateTime"]) >=
         strtotime($latestMovement["MovementDateTime"])
@@ -200,6 +208,8 @@ try {
     if (
         !$allowedByMovement &&
         $allowedByPickupScan &&
+        !$needsRecoveryRefill &&
+        !$atStationReturn &&
         $latestRefill &&
         strtotime($latestRefill["RefillDateTime"]) >=
         strtotime($latestScanEvent["ScanDateTime"])
@@ -230,6 +240,8 @@ try {
         ]
     ]);
 
+} catch (BottleConditionConflict $e) {
+    respond(409, ['success' => false, 'message' => $e->getMessage()]);
 } catch (PDOException $e) {
     error_log("Refill bottle verification database error: " . $e->getMessage());
 
