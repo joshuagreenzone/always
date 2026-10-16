@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../models/account.dart';
+import '../../services/api_service.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
@@ -43,6 +44,7 @@ class RiderHomeScreen extends StatelessWidget {
                 ),
               ),
               onPressed: () {
+                ApiService.setAccessToken(null);
                 Navigator.pop(dialogContext);
 
                 Navigator.pushAndRemoveUntil(

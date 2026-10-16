@@ -47,7 +47,7 @@ try {
 
     $account = $stmt->fetch();
 
-    if (!$account || $account['AccPassword'] !== $password) {
+    if (!$account || !password_verify($password, (string) ($account['AccPassword'] ?? ''))) {
 
         http_response_code(401);
 

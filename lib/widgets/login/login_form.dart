@@ -28,7 +28,7 @@ class _LoginFormState extends State<LoginForm> {
 
   Future<void> _login() async {
     final username = _usernameController.text.trim();
-    final password = _passwordController.text.trim();
+    final password = _passwordController.text;
 
     if (username.isEmpty || password.isEmpty) {
       _showMessage('Please enter your username and password.');
