@@ -15,6 +15,7 @@ import '../refill/refill_screen.dart';
 import '../refill/refilled_bottles_screen.dart';
 
 import 'bottle_registration_screen.dart';
+import '../rider/dispenser_scan_screen.dart';
 
 class StationWorkerHomeScreen extends StatelessWidget {
   final Account account;
@@ -129,6 +130,19 @@ class StationWorkerHomeScreen extends StatelessWidget {
                       ),
                     );
                   },
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _DashboardCard(
+                  icon: Icons.qr_code_scanner,
+                  iconColor: const Color(0xFF0E7490),
+                  title: 'Dispensers',
+                  description: 'Scan dispenser returns and maintenance.',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => DispenserScanScreen(account: account),
+                    ),
+                  ),
                 ),
 
                 const SizedBox(height: AppSpacing.md),

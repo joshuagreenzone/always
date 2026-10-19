@@ -4,23 +4,27 @@ import 'package:intl/intl.dart';
 
 import '../../models/account.dart';
 import '../../services/vehicle_bottle_service.dart';
+import '../../services/scan_transition_service.dart';
 import '../../services/bottle_condition_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/common/bottle_condition_dialog.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 import '../../widgets/common/rider_scan_card.dart';
+import '../../widgets/common/scan_jump_dialog.dart';
 
 class VehicleScanScreen extends StatefulWidget {
   final Account account;
   final bool returning;
   final VehicleBottleService? service;
   final BottleConditionService? conditionService;
+  final ScanTransitionService? transitionService;
   const VehicleScanScreen({
     super.key,
     required this.account,
     required this.returning,
     this.service,
     this.conditionService,
+    this.transitionService,
   });
 
   @override
@@ -30,6 +34,7 @@ class VehicleScanScreen extends StatefulWidget {
 class _VehicleScanScreenState extends State<VehicleScanScreen> {
   final _scanner = createBottleScannerController(autoStart: false);
   final List<String> _pending = [];
+  final Map<String, Map<String, dynamic>> _jumpDetails = {};
   late final _service = widget.service ?? VehicleBottleService();
   List<Map<String, dynamic>> _inventory = [];
   List<Map<String, dynamic>> _returns = [];
@@ -198,8 +203,17 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
         _action,
       );
       if (!mounted) return;
+      final transition = await checkScanJump(
+        context: context,
+        bottleNumber: number,
+        eventType: widget.returning ? 'UNLOAD_SCAN' : 'LOAD_SCAN',
+        service: widget.transitionService,
+      );
+      if (!mounted || transition == null) return;
       setState(() {
         _pending.add(bottle['bottleNumber'].toString());
+        _jumpDetails[bottle['bottleNumber'].toString().toLowerCase()] =
+            transition;
         _error = null;
         _success =
             'Bottle ${bottle['bottleNumber']} added. Tap ${widget.returning ? 'Confirm Return' : 'Confirm Loading'} to save it.';
@@ -249,6 +263,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
         widget.account.accId,
         List.of(_pending),
         _action,
+        jumpDetails: _jumpDetails,
       );
       if (!mounted) return;
       final count = (result['count'] as num).toInt();
@@ -256,6 +271,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
           '${_bottles(count)} ${widget.returning ? 'returned to the station' : 'loaded for delivery'}. Saved successfully.';
       setState(() {
         _pending.clear();
+        _jumpDetails.clear();
         _error = null;
         _success = message;
       });
@@ -556,6 +572,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
                     ? null
                     : (number) => setState(() {
                         _pending.remove(number);
+                        _jumpDetails.remove(number.toLowerCase());
                         _success =
                             'Bottle $number removed from the scanned list.';
                         _error = null;

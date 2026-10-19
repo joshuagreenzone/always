@@ -4,6 +4,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../services/batch_scan_location.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 import '../../widgets/common/rider_scan_card.dart';
+import '../../widgets/common/scan_jump_dialog.dart';
 
 import '../../models/account.dart';
 import '../../models/order_details.dart';
@@ -91,6 +92,13 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
         bottleNumber,
         'DELIVERY',
       );
+      if (!mounted) return;
+      final transition = await checkScanJump(
+        context: context,
+        bottleNumber: bottleNumber,
+        eventType: 'DELIVERY_SCAN',
+      );
+      if (!mounted || transition == null) return;
       final position = await _batchLocation.get();
       if (!mounted) return;
       setState(() {
@@ -100,6 +108,8 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
             latitude: position.latitude,
             longitude: position.longitude,
             accuracy: position.accuracy,
+            jumpReason: transition['jumpReason']?.toString(),
+            previousScanEventId: transition['previousScanEventId'] as int?,
           ),
         );
         _scanSuccess = true;
@@ -158,6 +168,8 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
         'latitude': item.latitude,
         'longitude': item.longitude,
         'accuracy': item.accuracy,
+        'jumpReason': item.jumpReason,
+        'previousScanEventId': item.previousScanEventId,
       };
     }).toList();
 
@@ -347,11 +359,15 @@ class _PendingDeliveryBottle {
   final double latitude;
   final double longitude;
   final double accuracy;
+  final String? jumpReason;
+  final int? previousScanEventId;
 
   const _PendingDeliveryBottle({
     required this.bottleNumber,
     required this.latitude,
     required this.longitude,
     required this.accuracy,
+    this.jumpReason,
+    this.previousScanEventId,
   });
 }

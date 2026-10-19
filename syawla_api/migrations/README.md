@@ -1,4 +1,4 @@
-# Bottle condition history
+﻿# Bottle condition history
 
 Apply `20261012_bottle_condition_history.sql` to the existing Syawla database
 before deploying the new bottle-condition endpoints. It adds an audit table;
@@ -85,3 +85,52 @@ Run `php syawla_api/tests/bottle_cycle_test.php` on a development database.
 All test fixtures, load batches, and return batches are rolled back. For deployment,
 update the Flutter client and API together so riders can perform the newly required
 loading/return scans.
+
+## Scan cycle jumps
+
+Apply `20261016_scan_cycle_jump_reason.sql` to the `always` database after the vehicle scan event type
+migration. Future scan events can record whether the previous scan differs from
+the expected cycle step. `PreviousScanEventID` points to the latest event seen
+when the scan is committed; `ExpectedPreviousEventType` records the expected
+step, and `JumpReason` records the operator's explanation. A jump requires a
+nonblank reason. Existing events remain unclassified (`IsCycleJump = NULL`), since
+their reasons cannot be reconstructed. Refill, load, delivery, pickup, and return
+scanners now ask for a reason when the latest event differs from the expected
+previous step. The API rechecks the latest event when saving and rejects a stale
+prompt. Bottle condition, order assignment, and duplicate transaction checks
+still apply.
+
+## Multiple staff roles
+
+Apply `20261016_account_roles.sql` to `always` before deploying the mobile and
+stakeholder changes. It creates `account_roles` and copies each account's
+existing `AccType` into it. Staff can have both `RIDER` and `STATION_WORKER`.
+Apply `20261016_drop_account_type.sql` only after deploying role-aware API and
+admin code. Every account must have at least one row in `account_roles` first.
+Login still returns a computed `AccType` for older mobile clients, but roles are
+stored only in `account_roles`. Stakeholder management updates role records in
+the same transaction as account details.
+
+## Dispenser inventory
+
+Apply `20261016_dispenser_lifecycle.sql` to the active `always` database before
+deploying the dispenser web hub and mobile app. It creates dispenser inventory,
+scan events, customer deployment history, physical-state history, and maintenance
+records. A dispenser can be delivered independently of an order. Load, delivery,
+pickup, and station return require scans; a skipped process requires a reason.
+Maintenance is optional and can be recorded at a customer site or station. Mobile
+maintenance records require a dispenser scan. An admin can enter an external
+technician's work manually, with the admin and verification note stored in history.
+Maintenance captures the dispenser state before and after the work; a changed state
+is saved in state history in the same transaction.
+Existing bottle inventory is not repurposed or altered.
+
+Apply `20261017_dispenser_acquisition_payment.sql` to an existing dispenser
+database. It adds acquisition type (brand new or second hand), acquisition cost,
+and payment status (free, paid, or unpaid). Existing dispensers remain unclassified
+until their acquisition details are known; new registrations must supply them.
+
+Apply `20261017_dispenser_maintenance_note.sql` to an existing database with the
+dispenser lifecycle migration. Mobile maintenance scans collect a separate note and
+work description. Customer-site maintenance asks staff to select the customer
+directly, so it does not depend on a prior delivery or scan cycle.

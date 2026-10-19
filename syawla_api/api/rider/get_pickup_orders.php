@@ -41,7 +41,7 @@ try {
 
             COUNT(
                 DISTINCT CASE
-                    WHEN dpt.BottleID IS NOT NULL
+                    WHEN dpt.BottleID IS NOT NULL OR returned.ODTID IS NOT NULL
                     THEN odt.BottleID
                 END
             ) AS PickedUpBottleCount,
@@ -51,7 +51,7 @@ try {
                 -
                 COUNT(
                     DISTINCT CASE
-                        WHEN dpt.BottleID IS NOT NULL
+                        WHEN dpt.BottleID IS NOT NULL OR returned.ODTID IS NOT NULL
                         THEN odt.BottleID
                     END
                 )
@@ -91,8 +91,18 @@ try {
             ON dpt.PickUpID = p.PickUpID
            AND dpt.BottleID = odt.BottleID
 
+        -- A reasoned station scan resolves this delivery's pickup when the
+        -- physical pickup scan was omitted. It does not invent a pickup event.
+        LEFT JOIN (
+            SELECT DISTINCT ODTID FROM bottle_scan_event
+            WHERE EventType IN ('UNLOAD_SCAN', 'REFILL_SCAN', 'LOAD_SCAN')
+              AND IsCycleJump = 1
+              AND ODTID IS NOT NULL
+        ) returned ON returned.ODTID = odt.ODTID
+
         WHERE d.AccID = :accId
-          AND a.AccType = 'RIDER'
+          AND EXISTS
+              (SELECT 1 FROM account_roles ar WHERE ar.AccID = a.AccID AND ar.Role = 'RIDER')
           AND d.DeliveryStatus IN ('DELIVERED', 'INCOMPLETE')
 
         GROUP BY
@@ -111,7 +121,7 @@ try {
             COUNT(DISTINCT odt.BottleID) >
             COUNT(
                 DISTINCT CASE
-                    WHEN dpt.BottleID IS NOT NULL
+                    WHEN dpt.BottleID IS NOT NULL OR returned.ODTID IS NOT NULL
                     THEN odt.BottleID
                 END
             )

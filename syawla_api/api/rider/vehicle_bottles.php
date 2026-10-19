@@ -10,7 +10,7 @@ try {
         $accId = (int) ($_GET['accId'] ?? 0);
         requireCycleRider($db, $accId);
         if (isset($_GET['bottleNumber'])) {
-            $data = verifyVehicleBottle($db, $accId, trim((string) $_GET['bottleNumber']), (string) ($_GET['action'] ?? ''));
+            $data = verifyVehicleBottle($db, $accId, trim((string) $_GET['bottleNumber']), (string) ($_GET['action'] ?? ''), true);
         } else {
             $stmt = $db->prepare("SELECT b.BottleNumber AS bottleNumber, b.BottleCondition AS `condition`,
                 c.CycleStatus AS status, c.UpdatedAt AS updatedAt
@@ -27,7 +27,7 @@ try {
         $input = json_decode(file_get_contents('php://input'), true);
         if (!is_array($input) || !is_array($input['bottleNumbers'] ?? null)) throw new InvalidArgumentException('Bottle numbers are required.');
         $db->beginTransaction();
-        $data = saveVehicleBatch($db, (int) ($input['accId'] ?? 0), (string) ($input['action'] ?? ''), $input['bottleNumbers']);
+        $data = saveVehicleBatch($db, (int) ($input['accId'] ?? 0), (string) ($input['action'] ?? ''), $input['bottleNumbers'], $input['jumpDetails'] ?? []);
         $db->commit();
     } else {
         http_response_code(405);

@@ -19,6 +19,7 @@ try {
 
     $accId = (int)($input["accId"] ?? 0);
     $bottleNumbers = $input["bottleNumbers"] ?? [];
+    $jumpDetails = is_array($input['jumpDetails'] ?? null) ? $input['jumpDetails'] : [];
 
     $latitude = isset($input["latitude"])
         ? (float)$input["latitude"]
@@ -78,7 +79,7 @@ try {
 
     // Validate account.
     $stmt = $db->prepare("
-        SELECT AccID, AccType
+        SELECT AccID
         FROM accounts
         WHERE AccID = :accId
         LIMIT 1
@@ -95,6 +96,10 @@ try {
             "success" => false,
             "message" => "Invalid account."
         ]);
+    }
+
+    if (!accountHasRole($db, $accId, 'STATION_WORKER')) {
+        respond(403, ['success' => false, 'message' => 'Only station workers can record refills.']);
     }
 
     $db->beginTransaction();
@@ -133,133 +138,152 @@ try {
 
             $bottleId = (int)$bottle["BottleID"];
             requireHealthyBottle($db, $bottleId);
-            $atStationReturn = requireBottleAtStationForRefill($db, $bottleId);
+            $details = $jumpDetails[strtolower($bottleNumber)] ?? [];
+            $transition = requireScanTransition($db, $bottleId, 'REFILL_SCAN',
+                $details['jumpReason'] ?? null,
+                array_key_exists('previousScanEventId', $details) ? ($details['previousScanEventId'] ?? 0) : null);
+            $deliveryLink = null;
+            if ($transition['isCycleJump']) {
+                $cycle = getBottleCycle($db, $bottleId);
+                if (($cycle['CycleStatus'] ?? null) === 'DELIVERED' && !empty($cycle['ODTID'])) {
+                    $stmt = $db->prepare('SELECT ODTID, OrderID, DeliveryID FROM order_delivery_transaction
+                        WHERE ODTID = ? AND BottleID = ?');
+                    $stmt->execute([$cycle['ODTID'], $bottleId]);
+                    $deliveryLink = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$deliveryLink) {
+                        throw new DomainException("Bottle {$bottleNumber}'s delivery could not be matched.");
+                    }
+                }
+            }
+            if (!$transition['isCycleJump']) {
+                $atStationReturn = requireBottleAtStationForRefill($db, $bottleId);
 
-            // Get latest refill.
-            $stmt = $db->prepare("
-                SELECT RefillID, RefillDateTime
-                FROM refill
-                WHERE BottleID = :bottleId
-                ORDER BY RefillDateTime DESC, RefillID DESC
-                LIMIT 1
-            ");
-
-            $stmt->execute([
-                ":bottleId" => $bottleId
-            ]);
-
-            $latestRefill = $stmt->fetch(PDO::FETCH_ASSOC);
-            $needsRecoveryRefill = bottleNeedsRecoveryRefill($db, $bottleId);
-            $allowedByRecovery = $atStationReturn || canRefillRecoveredBottle($db, $bottleId, $latestRefill);
-
-            // Get latest premise movement.
-            $stmt = $db->prepare("
-                SELECT MovementID, MovementType, MovementDateTime
-                FROM premise_bottle_movement
-                WHERE BottleID = :bottleId
-                ORDER BY MovementDateTime DESC, MovementID DESC
-                LIMIT 1
-            ");
-
-            $stmt->execute([
-                ":bottleId" => $bottleId
-            ]);
-
-            $latestMovement = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            // Get latest bottle scan event.
-            $stmt = $db->prepare("
-                SELECT EventType, ScanDateTime
-                FROM bottle_scan_event
-                WHERE BottleID = :bottleId
-                ORDER BY ScanDateTime DESC
-                LIMIT 1
-            ");
-
-            $stmt->execute([
-                ":bottleId" => $bottleId
-            ]);
-
-            $latestScanEvent = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            /*
-             * Allow if:
-             * - Latest premise movement is RETURN; OR
-             * - Latest bottle scan event is PICKUP_SCAN.
-             */
-            $allowedByMovement =
-                $latestMovement &&
-                strtoupper(trim($latestMovement["MovementType"])) === "RETURN";
-
-            $allowedByPickupScan =
-                $latestScanEvent &&
-                strtoupper(trim($latestScanEvent["EventType"])) === "PICKUP_SCAN";
-
-            /*
-             * No movement and no pickup scan:
-             * permit a first refill only for a genuinely new bottle.
-             */
-            if (!$latestMovement && !$allowedByPickupScan && !$allowedByRecovery) {
+                // Get latest refill.
                 $stmt = $db->prepare("
-                    SELECT COUNT(*)
-                    FROM order_delivery_transaction
+                    SELECT RefillID, RefillDateTime
+                    FROM refill
                     WHERE BottleID = :bottleId
+                    ORDER BY RefillDateTime DESC, RefillID DESC
+                    LIMIT 1
                 ");
 
                 $stmt->execute([
                     ":bottleId" => $bottleId
                 ]);
 
-                $deliveryCount = (int)$stmt->fetchColumn();
+                $latestRefill = $stmt->fetch(PDO::FETCH_ASSOC);
+                $needsRecoveryRefill = bottleNeedsRecoveryRefill($db, $bottleId);
+                $allowedByRecovery = $atStationReturn || canRefillRecoveredBottle($db, $bottleId, $latestRefill);
 
-                if ($latestRefill || $deliveryCount > 0) {
+                // Get latest premise movement.
+                $stmt = $db->prepare("
+                    SELECT MovementID, MovementType, MovementDateTime
+                    FROM premise_bottle_movement
+                    WHERE BottleID = :bottleId
+                    ORDER BY MovementDateTime DESC, MovementID DESC
+                    LIMIT 1
+                ");
+
+                $stmt->execute([
+                    ":bottleId" => $bottleId
+                ]);
+
+                $latestMovement = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                // Get latest bottle scan event.
+                $stmt = $db->prepare("
+                    SELECT EventType, ScanDateTime
+                    FROM bottle_scan_event
+                    WHERE BottleID = :bottleId
+                    ORDER BY ScanDateTime DESC
+                    LIMIT 1
+                ");
+
+                $stmt->execute([
+                    ":bottleId" => $bottleId
+                ]);
+
+                $latestScanEvent = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                /*
+                 * Allow if:
+                 * - Latest premise movement is RETURN; OR
+                 * - Latest bottle scan event is PICKUP_SCAN.
+                 */
+                $allowedByMovement =
+                    $latestMovement &&
+                    strtoupper(trim($latestMovement["MovementType"])) === "RETURN";
+
+                $allowedByPickupScan =
+                    $latestScanEvent &&
+                    strtoupper(trim($latestScanEvent["EventType"])) === "PICKUP_SCAN";
+
+                /*
+                 * No movement and no pickup scan:
+                 * permit a first refill only for a genuinely new bottle.
+                 */
+                if (!$latestMovement && !$allowedByPickupScan && !$allowedByRecovery) {
+                    $stmt = $db->prepare("
+                        SELECT COUNT(*)
+                        FROM order_delivery_transaction
+                        WHERE BottleID = :bottleId
+                    ");
+
+                    $stmt->execute([
+                        ":bottleId" => $bottleId
+                    ]);
+
+                    $deliveryCount = (int)$stmt->fetchColumn();
+
+                    if ($latestRefill || $deliveryCount > 0) {
+                        throw new DomainException(
+                            "Bottle {$bottleNumber} has previous activity but no "
+                            . "premise movement history or valid pickup scan. "
+                            . "No records were saved."
+                        );
+                    }
+                } elseif (!$allowedByMovement && !$allowedByPickupScan && !$allowedByRecovery) {
                     throw new DomainException(
-                        "Bottle {$bottleNumber} has previous activity but no "
-                        . "premise movement history or valid pickup scan. "
+                        "Bottle {$bottleNumber} is not eligible for refill. "
+                        . "Its latest premise movement is not RETURN and "
+                        . "its latest scan event is not PICKUP_SCAN. "
                         . "No records were saved."
                     );
                 }
-            } elseif (!$allowedByMovement && !$allowedByPickupScan && !$allowedByRecovery) {
-                throw new DomainException(
-                    "Bottle {$bottleNumber} is not eligible for refill. "
-                    . "Its latest premise movement is not RETURN and "
-                    . "its latest scan event is not PICKUP_SCAN. "
-                    . "No records were saved."
-                );
-            }
 
-            // Prevent duplicate refill after the latest RETURN movement.
-            if (
-                $allowedByMovement &&
-                !$needsRecoveryRefill &&
-                !$atStationReturn &&
-                $latestRefill &&
-                strtotime($latestRefill["RefillDateTime"]) >=
-                strtotime($latestMovement["MovementDateTime"])
-            ) {
-                throw new DomainException(
-                    "Bottle {$bottleNumber} has already been refilled "
-                    . "after its latest return. No records were saved."
-                );
-            }
+                // Prevent duplicate refill after the latest RETURN movement.
+                if (
+                    $allowedByMovement &&
+                    !$needsRecoveryRefill &&
+                    !$atStationReturn &&
+                    $latestRefill &&
+                    strtotime($latestRefill["RefillDateTime"]) >=
+                    strtotime($latestMovement["MovementDateTime"])
+                ) {
+                    throw new DomainException(
+                        "Bottle {$bottleNumber} has already been refilled "
+                        . "after its latest return. No records were saved."
+                    );
+                }
 
-            /*
-             * If eligibility is based on PICKUP_SCAN, prevent a duplicate
-             * refill after that scan.
-             */
-            if (
-                !$allowedByMovement &&
-                $allowedByPickupScan &&
-                !$needsRecoveryRefill &&
-                !$atStationReturn &&
-                $latestRefill &&
-                strtotime($latestRefill["RefillDateTime"]) >=
-                strtotime($latestScanEvent["ScanDateTime"])
-            ) {
-                throw new DomainException(
-                    "Bottle {$bottleNumber} has already been refilled "
-                    . "after its latest pickup scan. No records were saved."
-                );
+                /*
+                 * If eligibility is based on PICKUP_SCAN, prevent a duplicate
+                 * refill after that scan.
+                 */
+                if (
+                    !$allowedByMovement &&
+                    $allowedByPickupScan &&
+                    !$needsRecoveryRefill &&
+                    !$atStationReturn &&
+                    $latestRefill &&
+                    strtotime($latestRefill["RefillDateTime"]) >=
+                    strtotime($latestScanEvent["ScanDateTime"])
+                ) {
+                    throw new DomainException(
+                        "Bottle {$bottleNumber} has already been refilled "
+                        . "after its latest pickup scan. No records were saved."
+                    );
+                }
             }
 
             // Save refill.
@@ -287,7 +311,14 @@ try {
                     BottleID,
                     AccID,
                     EventType,
+                    IsCycleJump,
+                    PreviousScanEventID,
+                    ExpectedPreviousEventType,
+                    JumpReason,
                     RefillID,
+                    ODTID,
+                    OrderID,
+                    DeliveryID,
                     ScanDateTime,
                     Latitude,
                     Longitude,
@@ -297,7 +328,14 @@ try {
                     :bottleId,
                     :accId,
                     'REFILL_SCAN',
+                    :isCycleJump,
+                    :previousScanEventId,
+                    :expectedPreviousEventType,
+                    :jumpReason,
                     :refillId,
+                    :odtId,
+                    :orderId,
+                    :deliveryId,
                     CURRENT_TIMESTAMP,
                     :latitude,
                     :longitude,
@@ -308,7 +346,14 @@ try {
             $stmt->execute([
                 ":bottleId" => $bottleId,
                 ":accId" => $accId,
+                ':isCycleJump' => (int) $transition['isCycleJump'],
+                ':previousScanEventId' => $transition['previousScanEventId'],
+                ':expectedPreviousEventType' => $transition['expectedPreviousEventType'],
+                ':jumpReason' => $transition['jumpReason'],
                 ":refillId" => $refillId,
+                ':odtId' => $deliveryLink['ODTID'] ?? null,
+                ':orderId' => $deliveryLink['OrderID'] ?? null,
+                ':deliveryId' => $deliveryLink['DeliveryID'] ?? null,
                 ":latitude" => $latitude,
                 ":longitude" => $longitude,
                 ":accuracy" => $accuracy

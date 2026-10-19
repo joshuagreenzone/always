@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/batch_scan_location.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
+import '../../widgets/common/scan_jump_dialog.dart';
 
 import 'package:mobile_scanner/mobile_scanner.dart';
 
@@ -30,6 +31,7 @@ class _RefillScreenState extends State<RefillScreen> {
   final _batchLocation = BatchScanLocation();
   final List<Bottle> _batch = [];
   final Set<String> _batchNumbers = {};
+  final Map<String, Map<String, dynamic>> _jumpDetails = {};
 
   bool _isScanning = false;
   bool _isVerifying = false;
@@ -91,6 +93,12 @@ class _RefillScreenState extends State<RefillScreen> {
       final bottle = await _refillService.verifyBottle(number);
 
       if (!mounted) return;
+      final transition = await checkScanJump(
+        context: context,
+        bottleNumber: bottle.bottleNumber,
+        eventType: 'REFILL_SCAN',
+      );
+      if (!mounted || transition == null) return;
 
       final verifiedNumber = bottle.bottleNumber.trim();
 
@@ -102,6 +110,7 @@ class _RefillScreenState extends State<RefillScreen> {
         setState(() {
           _batch.add(bottle);
           _batchNumbers.add(verifiedNumber);
+          _jumpDetails[verifiedNumber.toLowerCase()] = transition;
           _errorMessage = null;
         });
       }
@@ -192,6 +201,7 @@ class _RefillScreenState extends State<RefillScreen> {
         latitude: position.latitude,
         longitude: position.longitude,
         accuracy: position.accuracy,
+        jumpDetails: _jumpDetails,
       );
 
       if (!mounted) return;
@@ -204,6 +214,7 @@ class _RefillScreenState extends State<RefillScreen> {
         _batch.clear();
         _batchLocation.clear();
         _batchNumbers.clear();
+        _jumpDetails.clear();
         _lastScannedNumber = null;
         _isSaving = false;
       });
@@ -270,6 +281,7 @@ class _RefillScreenState extends State<RefillScreen> {
     setState(() {
       _batch.remove(bottle);
       _batchNumbers.remove(bottle.bottleNumber.trim());
+      _jumpDetails.remove(bottle.bottleNumber.trim().toLowerCase());
       if (_batch.isEmpty) _batchLocation.clear();
     });
   }
@@ -306,6 +318,7 @@ class _RefillScreenState extends State<RefillScreen> {
       _batch.clear();
       _batchLocation.clear();
       _batchNumbers.clear();
+      _jumpDetails.clear();
       _errorMessage = null;
       _lastScannedNumber = null;
     });

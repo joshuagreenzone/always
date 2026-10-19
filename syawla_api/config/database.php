@@ -3,7 +3,7 @@
 class Database
 {
     private string $host = "localhost";
-    private string $dbName = "syawla";
+    private string $dbName = "always";
     private string $username = "root";
     private string $password = "";
 

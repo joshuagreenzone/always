@@ -9,11 +9,13 @@ import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_text_styles.dart';
 import '../login/login_screen.dart';
+import '../refill/refill_screen.dart';
 
 import 'assigned_orders_screen.dart';
 import 'pickup_orders_screen.dart';
 import 'transaction_history_screen.dart';
 import 'vehicle_scan_screen.dart';
+import 'dispenser_scan_screen.dart';
 
 class RiderHomeScreen extends StatelessWidget {
   final Account account;
@@ -161,6 +163,35 @@ class RiderHomeScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(height: AppSpacing.md),
+                _DashboardCard(
+                  icon: Icons.qr_code_scanner,
+                  iconColor: const Color(0xFF0E7490),
+                  title: 'Dispensers',
+                  description: 'Scan dispenser loading, delivery, pickup, return and maintenance.',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => DispenserScanScreen(account: account),
+                    ),
+                  ),
+                ),
+                if (account.hasRole('STATION_WORKER')) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _DashboardCard(
+                    icon: Icons.water_drop_rounded,
+                    iconColor: const Color(0xFF0284C7),
+                    title: 'Refill',
+                    description:
+                        'Scan and record bottles refilled at the station.',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => RefillScreen(account: account),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.md),
                 _DashboardCard(
                   icon: Icons.history_rounded,

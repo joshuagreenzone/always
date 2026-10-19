@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../services/batch_scan_location.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 import '../../widgets/common/rider_scan_card.dart';
+import '../../widgets/common/scan_jump_dialog.dart';
 
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -23,12 +24,16 @@ class _PendingPickupBottle {
   final double latitude;
   final double longitude;
   final double accuracy;
+  final String? jumpReason;
+  final int? previousScanEventId;
 
   _PendingPickupBottle({
     required this.bottleNumber,
     required this.latitude,
     required this.longitude,
     required this.accuracy,
+    this.jumpReason,
+    this.previousScanEventId,
   });
 }
 
@@ -144,6 +149,13 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
         return;
       }
 
+      final transition = await checkScanJump(
+        context: context,
+        bottleNumber: bottleNumber,
+        eventType: 'PICKUP_SCAN',
+      );
+      if (!mounted || transition == null) return;
+
       final position = await _batchLocation.get();
       if (!mounted) return;
       setState(() {
@@ -153,6 +165,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
             latitude: position.latitude,
             longitude: position.longitude,
             accuracy: position.accuracy,
+            jumpReason: transition['jumpReason']?.toString(),
+            previousScanEventId: transition['previousScanEventId'] as int?,
           ),
         );
         _scanSuccess = true;
@@ -214,6 +228,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                 'latitude': item.latitude,
                 'longitude': item.longitude,
                 'accuracy': item.accuracy,
+                'jumpReason': item.jumpReason,
+                'previousScanEventId': item.previousScanEventId,
               },
             )
             .toList(),

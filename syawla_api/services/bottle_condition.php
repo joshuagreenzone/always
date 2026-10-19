@@ -1,12 +1,12 @@
 <?php
 
+require_once __DIR__ . '/account_roles.php';
+
 class BottleConditionConflict extends DomainException {}
 
 function requireBottleConditionAccount(PDO $db, int $accId): void
 {
-    $stmt = $db->prepare('SELECT AccType FROM accounts WHERE AccID = :accId');
-    $stmt->execute([':accId' => $accId]);
-    if (!in_array($stmt->fetchColumn(), ['STATION_WORKER', 'RIDER'], true)) {
+    if (!accountHasRole($db, $accId, 'STATION_WORKER') && !accountHasRole($db, $accId, 'RIDER')) {
         throw new UnexpectedValueException('Only station workers and riders can update bottle states.');
     }
 }

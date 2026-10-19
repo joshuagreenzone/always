@@ -14,17 +14,27 @@ function rejectCycle(callable $action, string $type = DomainException::class): v
 $db = (new Database())->connect();
 $db->beginTransaction();
 try {
-    $rider = (int) $db->query("SELECT AccID FROM accounts WHERE AccType = 'RIDER' LIMIT 1")->fetchColumn();
-    $worker = (int) $db->query("SELECT AccID FROM accounts WHERE AccType = 'STATION_WORKER' LIMIT 1")->fetchColumn();
+    $rider = (int) $db->query("SELECT AccID FROM account_roles WHERE Role = 'RIDER' LIMIT 1")->fetchColumn();
+    $worker = (int) $db->query("SELECT AccID FROM account_roles WHERE Role = 'STATION_WORKER' LIMIT 1")->fetchColumn();
     $type = (int) $db->query('SELECT BottleTypeID FROM bottle_types LIMIT 1')->fetchColumn();
     $pickup = $db->query("SELECT p.PickUpID, d.DeliveryID, d.OrderID FROM pickup p
         INNER JOIN delivery d ON d.DeliveryID = p.DeliveryID WHERE p.AccID = {$rider} LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if (!$pickup && $rider) {
+        $delivery = $db->query("SELECT DeliveryID, OrderID FROM delivery WHERE AccID = {$rider} LIMIT 1")
+            ->fetch(PDO::FETCH_ASSOC);
+        if ($delivery) {
+            $db->prepare('INSERT INTO pickup (DeliveryID, AccID, PickUpDateTime) VALUES (?, ?, NOW())')
+                ->execute([(int) $delivery['DeliveryID'], $rider]);
+            $pickup = ['PickUpID' => (int) $db->lastInsertId()] + $delivery;
+        }
+    }
     checkCycle($rider && $worker && $type && $pickup, 'Existing rider pickup fixtures are required.');
     $token = bin2hex(random_bytes(6));
-    $stmt = $db->prepare("INSERT INTO accounts (AccName, AccEmail, AccUsername, AccPassword, AccType)
-        VALUES ('Cycle test', ?, ?, 'test-only', 'RIDER')");
+    $stmt = $db->prepare("INSERT INTO accounts (AccName, AccEmail, AccUsername, AccPassword)
+        VALUES ('Cycle test', ?, ?, 'test-only')");
     $stmt->execute(["cycle-{$token}@example.invalid", "cycle-{$token}"]);
     $otherRider = (int) $db->lastInsertId();
+    $db->prepare("INSERT INTO account_roles (AccID, Role) VALUES (?, 'RIDER')")->execute([$otherRider]);
     $number = 'CYCLE-' . $token;
     $stmt = $db->prepare('INSERT INTO bottles (BottleNumber, BottleTypeID) VALUES (?, ?)');
     $stmt->execute([$number, $type]);
@@ -123,6 +133,31 @@ try {
     $events->execute([$id]);
     checkCycle(array_column($events->fetchAll(PDO::FETCH_ASSOC), 'EventType') === ['LOAD_SCAN', 'UNLOAD_SCAN', 'LOAD_SCAN'],
         'Repeated trips or rejected scans produced incorrect events.');
+    $jumpNumber = 'JUMP-' . $token;
+    $stmt = $db->prepare('INSERT INTO bottles (BottleNumber, BottleTypeID) VALUES (?, ?)');
+    $stmt->execute([$jumpNumber, $type]);
+    $jumpId = (int) $db->lastInsertId();
+    $stmt = $db->prepare('INSERT INTO refill (BottleID) VALUES (?)');
+    $stmt->execute([$jumpId]);
+    $jumpRefill = (int) $db->lastInsertId();
+    $activity->execute([$jumpId, $worker, 'REFILL_SCAN', $jumpRefill, null, null]);
+    $previousId = (int) $db->lastInsertId();
+    rejectCycle(fn() => saveVehicleBatch($db, $rider, 'RETURN', [$jumpNumber]));
+    rejectCycle(fn() => saveVehicleBatch($db, $rider, 'RETURN', [$jumpNumber], [strtolower($jumpNumber) => [
+        'jumpReason' => '   ', 'previousScanEventId' => $previousId
+    ]]));
+    $jump = saveVehicleBatch($db, $rider, 'RETURN', [$jumpNumber], [strtolower($jumpNumber) => [
+        'jumpReason' => 'Found at station without pickup record', 'previousScanEventId' => $previousId
+    ]]);
+    $stmt = $db->prepare('SELECT IsCycleJump, PreviousScanEventID, ExpectedPreviousEventType, JumpReason
+        FROM bottle_scan_event WHERE BottleID = ? AND EventType = ?');
+    $stmt->execute([$jumpId, 'UNLOAD_SCAN']);
+    $jumpEvent = $stmt->fetch(PDO::FETCH_ASSOC);
+    checkCycle($jump['count'] === 1 && (int) $jumpEvent['IsCycleJump'] === 1
+        && (int) $jumpEvent['PreviousScanEventID'] === $previousId
+        && $jumpEvent['ExpectedPreviousEventType'] === 'PICKUP_SCAN'
+        && $jumpEvent['JumpReason'] === 'Found at station without pickup record',
+        'Reasoned scan jump was not saved with its history.');
     $db->rollBack();
     checkCycle(getBottleCondition($db, $number) === null, 'Cycle fixtures were not rolled back.');
     echo "Vehicle cycle checks passed; fixtures and all scans rolled back.\n";

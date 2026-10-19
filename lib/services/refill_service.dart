@@ -51,6 +51,7 @@ class RefillService {
     required double latitude,
     required double longitude,
     required double accuracy,
+    Map<String, Map<String, dynamic>> jumpDetails = const {},
   }) async {
     if (bottleNumbers.isEmpty) {
       throw RefillException(
@@ -73,6 +74,7 @@ class RefillService {
           'latitude': latitude,
           'longitude': longitude,
           'accuracy': accuracy,
+          'jumpDetails': jumpDetails,
         },
       );
 

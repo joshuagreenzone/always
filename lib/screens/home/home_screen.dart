@@ -11,18 +11,11 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final role = account.accType.trim().toUpperCase();
-
-    switch (role) {
-      case 'STATION_WORKER':
-        return StationWorkerHomeScreen(account: account);
-
-      case 'RIDER':
-        return RiderHomeScreen(account: account);
-
-      default:
-        return _UnknownRoleScreen(account: account);
+    if (account.hasRole('RIDER')) return RiderHomeScreen(account: account);
+    if (account.hasRole('STATION_WORKER')) {
+      return StationWorkerHomeScreen(account: account);
     }
+    return _UnknownRoleScreen(account: account);
   }
 }
 

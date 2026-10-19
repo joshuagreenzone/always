@@ -28,9 +28,9 @@ $db = (new Database())->connect();
 $db->beginTransaction();
 try {
     $typeId = (int) $db->query('SELECT BottleTypeID FROM bottle_types LIMIT 1')->fetchColumn();
-    $workerId = (int) $db->query("SELECT AccID FROM accounts WHERE AccType = 'STATION_WORKER' LIMIT 1")->fetchColumn();
-    $riderId = (int) $db->query("SELECT AccID FROM accounts WHERE AccType = 'RIDER' LIMIT 1")->fetchColumn();
-    $adminId = (int) $db->query("SELECT AccID FROM accounts WHERE AccType = 'ADMIN' LIMIT 1")->fetchColumn();
+    $workerId = (int) $db->query("SELECT AccID FROM account_roles WHERE Role = 'STATION_WORKER' LIMIT 1")->fetchColumn();
+    $riderId = (int) $db->query("SELECT AccID FROM account_roles WHERE Role = 'RIDER' LIMIT 1")->fetchColumn();
+    $adminId = (int) $db->query("SELECT AccID FROM account_roles WHERE Role = 'ADMIN' LIMIT 1")->fetchColumn();
     check($typeId > 0 && $workerId > 0 && $riderId > 0 && $adminId > 0, 'Development fixtures require bottle types and each staff role.');
 
     $number = 'STATE-TEST-' . bin2hex(random_bytes(8));

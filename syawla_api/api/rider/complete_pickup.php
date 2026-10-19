@@ -152,7 +152,9 @@ try {
             'bottleNumber' => $bottleNumber,
             'latitude' => $latitude,
             'longitude' => $longitude,
-            'accuracy' => $accuracy
+            'accuracy' => $accuracy,
+            'jumpReason' => $bottle['jumpReason'] ?? null,
+            'previousScanEventId' => $bottle['previousScanEventId'] ?? null
         ];
     }
 
@@ -160,7 +162,7 @@ try {
      * Verify rider account.
      */
     $accountStmt = $db->prepare("
-        SELECT AccID, AccName, AccType
+        SELECT AccID, AccName
         FROM accounts
         WHERE AccID = :accId
         LIMIT 1
@@ -172,7 +174,7 @@ try {
 
     $account = $accountStmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$account || $account['AccType'] !== 'RIDER') {
+    if (!$account || !accountHasRole($db, $accId, 'RIDER')) {
         http_response_code(403);
 
         echo json_encode([
@@ -309,6 +311,10 @@ try {
           AND dpt.BottleID = :bottleId
         LIMIT 1
     ");
+    $returnedStmt = $db->prepare("SELECT 1 FROM bottle_scan_event
+        WHERE ODTID = :odtId AND EventType IN ('UNLOAD_SCAN', 'REFILL_SCAN', 'LOAD_SCAN')
+          AND IsCycleJump = 1
+        LIMIT 1");
 
     /*
      * Insert pickup transaction.
@@ -332,6 +338,10 @@ try {
             BottleID,
             AccID,
             EventType,
+            IsCycleJump,
+            PreviousScanEventID,
+            ExpectedPreviousEventType,
+            JumpReason,
             OrderID,
             DeliveryID,
             PickUpID,
@@ -347,6 +357,10 @@ try {
             :bottleId,
             :accId,
             'PICKUP_SCAN',
+            :isCycleJump,
+            :previousScanEventId,
+            :expectedPreviousEventType,
+            :jumpReason,
             :orderId,
             :deliveryId,
             :pickUpId,
@@ -402,7 +416,13 @@ try {
         }
 
         $odtId = (int) $odt['ODTID'];
-        requireBottlePickupCycle($db, $bottleId, $accId, $odtId);
+        $returnedStmt->execute([':odtId' => $odtId]);
+        if ($returnedStmt->fetchColumn()) {
+            throw new DomainException('Bottle ' . $bottleNumber . ' has already returned to the station for this delivery.');
+        }
+        $transition = requireScanTransition($db, $bottleId, 'PICKUP_SCAN',
+            $pendingBottle['jumpReason'] ?? null,
+            array_key_exists('previousScanEventId', $pendingBottle) ? ($pendingBottle['previousScanEventId'] ?? 0) : null);
 
         /*
          * Prevent duplicate pickup.
@@ -435,6 +455,10 @@ try {
         $scanEventStmt->execute([
             ':bottleId' => $bottleId,
             ':accId' => $accId,
+            ':isCycleJump' => (int) $transition['isCycleJump'],
+            ':previousScanEventId' => $transition['previousScanEventId'],
+            ':expectedPreviousEventType' => $transition['expectedPreviousEventType'],
+            ':jumpReason' => $transition['jumpReason'],
             ':orderId' => $orderId,
             ':deliveryId' => $deliveryId,
             ':pickUpId' => $pickUpId,
@@ -464,11 +488,18 @@ try {
      * Count all bottles picked up for this delivery.
      */
     $pickedUpStmt = $db->prepare("
-        SELECT COUNT(*)
-        FROM delivery_pickup_transaction dpt
-        INNER JOIN pickup p
-            ON p.PickUpID = dpt.PickUpID
-        WHERE p.DeliveryID = :deliveryId
+        SELECT COUNT(DISTINCT odt.BottleID)
+        FROM order_delivery_transaction odt
+        LEFT JOIN pickup p ON p.DeliveryID = odt.DeliveryID
+        LEFT JOIN delivery_pickup_transaction dpt
+            ON dpt.PickUpID = p.PickUpID AND dpt.BottleID = odt.BottleID
+        LEFT JOIN (
+            SELECT DISTINCT ODTID FROM bottle_scan_event
+            WHERE EventType IN ('UNLOAD_SCAN', 'REFILL_SCAN', 'LOAD_SCAN')
+              AND IsCycleJump = 1 AND ODTID IS NOT NULL
+        ) returned ON returned.ODTID = odt.ODTID
+        WHERE odt.DeliveryID = :deliveryId
+          AND (dpt.BottleID IS NOT NULL OR returned.ODTID IS NOT NULL)
     ");
 
     $pickedUpStmt->execute([

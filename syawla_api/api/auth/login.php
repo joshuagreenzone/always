@@ -32,8 +32,7 @@ try {
             AccName,
             AccEmail,
             AccUsername,
-            AccPassword,
-            AccType
+            AccPassword
         FROM accounts
         WHERE AccUsername = :username
         LIMIT 1
@@ -60,6 +59,11 @@ try {
     }
 
     unset($account['AccPassword']);
+    $stmt = $db->prepare('SELECT Role FROM account_roles WHERE AccID = ? ORDER BY Role');
+    $stmt->execute([(int) $account['AccID']]);
+    $account['AccRoles'] = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $account['AccType'] = in_array('RIDER', $account['AccRoles'], true)
+        ? 'RIDER' : (in_array('STATION_WORKER', $account['AccRoles'], true) ? 'STATION_WORKER' : 'ADMIN');
 
     echo json_encode([
         "success" => true,

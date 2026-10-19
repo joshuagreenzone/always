@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/bottle_condition.php';
+require_once __DIR__ . '/scan_transition.php';
 
 const BOTTLE_CYCLE_LABELS = [
     'READY' => 'Ready for Loading', 'LOADED' => 'Loaded for Delivery',
@@ -10,9 +11,7 @@ const BOTTLE_CYCLE_LABELS = [
 
 function requireCycleRider(PDO $db, int $accId): void
 {
-    $stmt = $db->prepare('SELECT AccType FROM accounts WHERE AccID = ?');
-    $stmt->execute([$accId]);
-    if ($stmt->fetchColumn() !== 'RIDER') {
+    if (!accountHasRole($db, $accId, 'RIDER')) {
         throw new UnexpectedValueException('Only riders can load or return bottles.');
     }
 }
@@ -98,7 +97,7 @@ function requireBottleAtStationForRefill(PDO $db, int $id): bool
     return $status === 'RETURNED';
 }
 
-function verifyVehicleBottle(PDO $db, int $accId, string $number, string $action): array
+function verifyVehicleBottle(PDO $db, int $accId, string $number, string $action, bool $allowCycleJump = false): array
 {
     requireCycleRider($db, $accId);
     if (!in_array($action, ['LOAD', 'RETURN', 'DELIVERY'], true)) {
@@ -108,11 +107,29 @@ function verifyVehicleBottle(PDO $db, int $accId, string $number, string $action
     if (!$bottle) throw new OutOfBoundsException('Bottle not found.');
     $id = $bottle['bottleId'];
     if ($action === 'DELIVERY') {
-        requireLoadedBottle($db, $id, $accId);
-        return $bottle;
+        if ($allowCycleJump) {
+            requireBottleReadyForDelivery($db, $id);
+            $cycle = getBottleCycle($db, $id);
+            if ($cycle && $cycle['CycleStatus'] === 'LOADED' && (int) $cycle['AccID'] !== $accId) {
+                throw new BottleConditionConflict('This bottle was loaded by another rider.');
+            }
+        }
+        else requireLoadedBottle($db, $id, $accId);
+        return $bottle + ['cycle' => getBottleCycle($db, $id)];
     }
     requireHealthyBottle($db, $id, $action === 'RETURN');
     $cycle = getBottleCycle($db, $id);
+    if ($allowCycleJump) {
+        if ($action === 'RETURN' && $cycle && $cycle['CycleStatus'] === 'COLLECTED') {
+            if ((int) $cycle['AccID'] !== $accId) {
+                throw new BottleConditionConflict("Bottle {$number} was picked up by another rider. That rider must confirm its return to the station.");
+            }
+            if (empty($cycle['DPTID'])) {
+                throw new BottleConditionConflict("Bottle {$number} has no matching pickup record.");
+            }
+        }
+        return $bottle + ['cycle' => $cycle];
+    }
     if ($action === 'LOAD') {
         requireBottleReadyForDelivery($db, $id);
         if (!$cycle || $cycle['CycleStatus'] !== 'READY' || !$cycle['RefillID']) {
@@ -143,7 +160,7 @@ function verifyVehicleBottle(PDO $db, int $accId, string $number, string $action
     return $bottle + ['cycle' => $cycle];
 }
 
-function saveVehicleBatch(PDO $db, int $accId, string $action, array $numbers): array
+function saveVehicleBatch(PDO $db, int $accId, string $action, array $numbers, array $jumpDetails = []): array
 {
     if (!$db->inTransaction()) throw new LogicException('Vehicle scans require a transaction.');
     requireCycleRider($db, $accId);
@@ -160,33 +177,54 @@ function saveVehicleBatch(PDO $db, int $accId, string $action, array $numbers): 
     // Consistent lock order for concurrent batches. Validation precedes all writes.
     ksort($normalized);
     $verified = [];
-    foreach ($normalized as $number) $verified[] = verifyVehicleBottle($db, $accId, $number, $action);
+    $eventType = $action === 'LOAD' ? 'LOAD_SCAN' : 'UNLOAD_SCAN';
+    foreach ($normalized as $number) {
+        $bottle = verifyVehicleBottle($db, $accId, $number, $action, true);
+        $details = $jumpDetails[strtolower($number)] ?? [];
+        $transition = requireScanTransition($db, $bottle['bottleId'], $eventType,
+            $details['jumpReason'] ?? null,
+            array_key_exists('previousScanEventId', $details) ? ($details['previousScanEventId'] ?? 0) : null);
+        $verified[] = $bottle + ['transition' => $transition];
+    }
     $stmt = $db->prepare('INSERT INTO vehicle_scan_batch (AccID, Action, BottleCount) VALUES (?, ?, ?)');
     $stmt->execute([$accId, $action, count($verified)]);
     $batchId = (int) $db->lastInsertId();
     $eventStmt = $db->prepare('INSERT INTO bottle_scan_event
-        (BottleID, AccID, EventType, RefillID, ODTID, DPTID, OrderID, DeliveryID, PickUpID, ScanDateTime)
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ScannedAt FROM vehicle_scan_batch WHERE BatchID = ?');
+        (BottleID, AccID, EventType, RefillID, ODTID, DPTID, OrderID, DeliveryID, PickUpID,
+         IsCycleJump, PreviousScanEventID, ExpectedPreviousEventType, JumpReason, ScanDateTime)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ScannedAt FROM vehicle_scan_batch WHERE BatchID = ?');
     $pickupStmt = $db->prepare('SELECT p.PickUpID, p.DeliveryID, d.OrderID
         FROM delivery_pickup_transaction dpt
         INNER JOIN pickup p ON p.PickUpID = dpt.PickUpID
         INNER JOIN delivery d ON d.DeliveryID = p.DeliveryID WHERE dpt.DPTID = ?');
+    $deliveryStmt = $db->prepare('SELECT odt.OrderID, odt.DeliveryID
+        FROM order_delivery_transaction odt WHERE odt.ODTID = ? AND odt.BottleID = ?');
     $stmt = $db->prepare('INSERT INTO vehicle_bottle_scan (BatchID, BottleID, RefillID, DPTID) VALUES (?, ?, ?, ?)');
     foreach ($verified as $bottle) {
         $cycle = $bottle['cycle'];
-        $stmt->execute([$batchId, $bottle['bottleId'], $cycle['RefillID'], $action === 'RETURN' ? $cycle['DPTID'] : null]);
+        $stmt->execute([$batchId, $bottle['bottleId'], $cycle['RefillID'] ?? null, $action === 'RETURN' ? ($cycle['DPTID'] ?? null) : null]);
         $pickup = null;
-        if ($action === 'RETURN') {
+        if ($action === 'RETURN' && !empty($cycle['DPTID'])) {
             $pickupStmt->execute([$cycle['DPTID']]);
             $pickup = $pickupStmt->fetch(PDO::FETCH_ASSOC);
             if (!$pickup) throw new BottleConditionConflict('The confirmed pickup could not be found.');
         }
+        $delivery = null;
+        if (($cycle['CycleStatus'] ?? null) === 'DELIVERED' && !empty($cycle['ODTID'])) {
+            $deliveryStmt->execute([$cycle['ODTID'], $bottle['bottleId']]);
+            $delivery = $deliveryStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$delivery) throw new BottleConditionConflict('The delivered bottle could not be matched to its order.');
+        }
         $eventStmt->execute([$bottle['bottleId'], $accId, $action === 'LOAD' ? 'LOAD_SCAN' : 'UNLOAD_SCAN',
-            $cycle['RefillID'], $action === 'RETURN' ? $cycle['ODTID'] : null,
-            $action === 'RETURN' ? $cycle['DPTID'] : null,
-            $pickup['OrderID'] ?? null, $pickup['DeliveryID'] ?? null, $pickup['PickUpID'] ?? null, $batchId]);
+            $cycle['RefillID'] ?? null,
+            $action === 'RETURN' || $delivery ? ($cycle['ODTID'] ?? null) : null,
+            $action === 'RETURN' ? ($cycle['DPTID'] ?? null) : null,
+            $pickup['OrderID'] ?? $delivery['OrderID'] ?? null,
+            $pickup['DeliveryID'] ?? $delivery['DeliveryID'] ?? null, $pickup['PickUpID'] ?? null,
+            (int) $bottle['transition']['isCycleJump'], $bottle['transition']['previousScanEventId'],
+            $bottle['transition']['expectedPreviousEventType'], $bottle['transition']['jumpReason'], $batchId]);
         setBottleCycle($db, $bottle['bottleId'], $action === 'LOAD' ? 'LOADED' : 'RETURNED', $accId,
-            $cycle['RefillID'], $cycle['ODTID'], $cycle['DPTID']);
+            $cycle['RefillID'] ?? null, $cycle['ODTID'] ?? null, $cycle['DPTID'] ?? null);
     }
     return ['batchId' => $batchId, 'count' => count($verified), 'status' => $action === 'LOAD' ? 'LOADED' : 'RETURNED'];
 }

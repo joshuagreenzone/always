@@ -5,6 +5,20 @@ import 'package:syawla/models/bottle_condition.dart';
 import 'package:syawla/services/bottle_condition_service.dart';
 import 'package:syawla/screens/rider/vehicle_scan_screen.dart';
 import 'package:syawla/services/vehicle_bottle_service.dart';
+import 'package:syawla/services/scan_transition_service.dart';
+
+class _TransitionService extends ScanTransitionService {
+  final bool jump;
+  _TransitionService({this.jump = false});
+
+  @override
+  Future<Map<String, dynamic>> check(String number, String eventType) async => {
+    'isCycleJump': jump,
+    'previousScanEventId': 1,
+    'previousEventType': jump ? 'REFILL_SCAN' : 'PICKUP_SCAN',
+    'expectedPreviousEventType': 'PICKUP_SCAN',
+  };
+}
 
 class _InventoryService extends VehicleBottleService {
   bool fail = false;
@@ -14,6 +28,7 @@ class _InventoryService extends VehicleBottleService {
   int saves = 0;
   String? savedAction;
   List<String>? savedNumbers;
+  Map<String, Map<String, dynamic>>? savedJumpDetails;
   @override
   Future<Map<String, dynamic>> verify(
     int accId,
@@ -30,11 +45,13 @@ class _InventoryService extends VehicleBottleService {
   Future<Map<String, dynamic>> save(
     int accId,
     List<String> numbers,
-    String action,
-  ) async {
+    String action, {
+    Map<String, Map<String, dynamic>> jumpDetails = const {},
+  }) async {
     saves++;
     if (failSave) throw Exception('Unable to connect to the server.');
     savedNumbers = List.of(numbers);
+    savedJumpDetails = Map.of(jumpDetails);
     savedAction = action;
     returned = true;
     return {'count': numbers.length};
@@ -80,7 +97,11 @@ class _HealthyConditionService extends BottleConditionService {
   }) async => BottleCondition(bottleNumber: bottleNumber, condition: 'HEALTHY');
 }
 
-Future<void> _openReturn(WidgetTester tester, _InventoryService service) async {
+Future<void> _openReturn(
+  WidgetTester tester,
+  _InventoryService service, {
+  ScanTransitionService? transitionService,
+}) async {
   await tester.pumpWidget(
     MaterialApp(
       home: VehicleScanScreen(
@@ -88,6 +109,7 @@ Future<void> _openReturn(WidgetTester tester, _InventoryService service) async {
         returning: true,
         service: service,
         conditionService: _HealthyConditionService(),
+        transitionService: transitionService ?? _TransitionService(),
       ),
     ),
   );
@@ -233,6 +255,34 @@ void main() {
     expect(find.text('No bottles scanned yet.'), findsOneWidget);
     expect(find.textContaining('/200'), findsNothing);
     expect(service.saves, 0);
+  });
+
+  testWidgets('A jump needs a reason and saves it with the bottle', (
+    tester,
+  ) async {
+    final service = _InventoryService();
+    await _openReturn(
+      tester,
+      service,
+      transitionService: _TransitionService(jump: true),
+    );
+    await _enterBottle(tester);
+    expect(find.text('Explain scan jump'), findsOneWidget);
+    expect(find.text('Continue Scan'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, 'Found at station');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue Scan'));
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pumpAndSettle();
+    expect(find.text('Confirm Return (1)'), findsOneWidget);
+    await tester.tap(find.text('Confirm Return (1)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+    expect(
+      service.savedJumpDetails?['collected-2']?['jumpReason'],
+      'Found at station',
+    );
   });
 
   testWidgets('Failed confirmation retains scanned bottles for retry', (

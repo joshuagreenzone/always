@@ -50,10 +50,12 @@ class VehicleBottleService {
   Future<Map<String, dynamic>> save(
     int accId,
     List<String> numbers,
-    String action,
-  ) => _request('POST', {
+    String action, {
+    Map<String, Map<String, dynamic>> jumpDetails = const {},
+  }) => _request('POST', {
     'accId': accId,
     'bottleNumbers': numbers,
     'action': action,
+    'jumpDetails': jumpDetails,
   });
 }

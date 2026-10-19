@@ -103,7 +103,8 @@ try {
         WHERE d.DeliveryID = :deliveryId
           AND d.OrderID = :orderId
           AND d.AccID = :accId
-          AND a.AccType = 'RIDER'
+          AND EXISTS
+              (SELECT 1 FROM account_roles ar WHERE ar.AccID = a.AccID AND ar.Role = 'RIDER')
 
         LIMIT 1
     ";
@@ -215,7 +216,8 @@ try {
 
     $bottleId = (int) $bottle['BottleID'];
     requireBottleReadyForDelivery($db, $bottleId);
-    requireLoadedBottle($db, $bottleId, $accId);
+    verifyVehicleBottle($db, $accId, $bottleNumber, 'DELIVERY', true);
+    $preTransition = scanTransition($db, $bottleId, 'DELIVERY_SCAN');
 
     /*
      * ---------------------------------------------------------
@@ -456,7 +458,7 @@ try {
 
     $latestRefill = $refillStmt->fetch();
 
-    if (!$latestRefill) {
+    if (!$latestRefill && !$preTransition['isCycleJump']) {
 
         http_response_code(400);
 
@@ -508,7 +510,7 @@ try {
      */
 
     if (
-        $latestPickup &&
+        !$preTransition['isCycleJump'] && $latestPickup && $latestRefill &&
         strtotime($latestRefill['RefillDateTime']) <=
         strtotime($latestPickup['PickUpDateTime'])
     ) {
@@ -580,7 +582,11 @@ try {
 
     try {
         requireBottleReadyForDelivery($db, $bottleId);
-        $loadedCycle = requireLoadedBottle($db, $bottleId, $accId);
+        $db->prepare('SELECT BottleID FROM bottles WHERE BottleID = ? FOR UPDATE')->execute([$bottleId]);
+        verifyVehicleBottle($db, $accId, $bottleNumber, 'DELIVERY', true);
+        $transition = requireScanTransition($db, $bottleId, 'DELIVERY_SCAN',
+            $input['jumpReason'] ?? null,
+            array_key_exists('previousScanEventId', $input) ? ($input['previousScanEventId'] ?? 0) : null);
 
         /*
          * Insert the delivery transaction.
@@ -624,6 +630,10 @@ try {
                 BottleID,
                 AccID,
                 EventType,
+                IsCycleJump,
+                PreviousScanEventID,
+                ExpectedPreviousEventType,
+                JumpReason,
                 OrderID,
                 DeliveryID,
                 ODTID,
@@ -637,6 +647,10 @@ try {
                 :bottleId,
                 :accId,
                 'DELIVERY_SCAN',
+                :isCycleJump,
+                :previousScanEventId,
+                :expectedPreviousEventType,
+                :jumpReason,
                 :orderId,
                 :deliveryId,
                 :odtId,
@@ -654,6 +668,10 @@ try {
         $scanEventStmt->execute([
             ':bottleId' => $bottleId,
             ':accId' => $accId,
+            ':isCycleJump' => (int) $transition['isCycleJump'],
+            ':previousScanEventId' => $transition['previousScanEventId'],
+            ':expectedPreviousEventType' => $transition['expectedPreviousEventType'],
+            ':jumpReason' => $transition['jumpReason'],
             ':orderId' => $orderId,
             ':deliveryId' => $deliveryId,
             ':odtId' => $odtId,
@@ -663,7 +681,8 @@ try {
         ]);
 
         $scanEventId = (int) $db->lastInsertId();
-        setBottleCycle($db, $bottleId, 'DELIVERED', $accId, (int) $loadedCycle['RefillID'], $odtId);
+        setBottleCycle($db, $bottleId, 'DELIVERED', $accId,
+            $latestRefill ? (int) $latestRefill['RefillID'] : null, $odtId);
 
         /*
          * Both inserts succeeded.
@@ -671,7 +690,7 @@ try {
 
         $db->commit();
 
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
 
         /*
          * Something failed.
@@ -711,7 +730,7 @@ try {
         ]
     ]);
 
-} catch (BottleConditionConflict $e) {
+} catch (DomainException $e) {
     if ($db !== null && $db->inTransaction()) {
         $db->rollBack();
     }

@@ -109,7 +109,8 @@ try {
         WHERE d.DeliveryID = :deliveryId
           AND d.OrderID = :orderId
           AND d.AccID = :accId
-          AND a.AccType = 'RIDER'
+          AND EXISTS
+              (SELECT 1 FROM account_roles ar WHERE ar.AccID = a.AccID AND ar.Role = 'RIDER')
 
         LIMIT 1
     ";
@@ -327,15 +328,19 @@ try {
 
     $currentCountSql = "
         SELECT
-            COUNT(DISTINCT dpt.BottleID) AS PickedUpCount
+            COUNT(DISTINCT odt.BottleID) AS PickedUpCount
 
-        FROM pickup p
-
-        INNER JOIN delivery_pickup_transaction dpt
-            ON p.PickUpID = dpt.PickUpID
-
-        WHERE p.DeliveryID = :deliveryId
-          AND p.AccID = :accId
+        FROM order_delivery_transaction odt
+        LEFT JOIN pickup p ON p.DeliveryID = odt.DeliveryID AND p.AccID = :accId
+        LEFT JOIN delivery_pickup_transaction dpt
+            ON dpt.PickUpID = p.PickUpID AND dpt.BottleID = odt.BottleID
+        LEFT JOIN (
+            SELECT DISTINCT ODTID FROM bottle_scan_event
+            WHERE EventType IN ('UNLOAD_SCAN', 'REFILL_SCAN', 'LOAD_SCAN')
+              AND IsCycleJump = 1 AND ODTID IS NOT NULL
+        ) returned ON returned.ODTID = odt.ODTID
+        WHERE odt.DeliveryID = :deliveryId
+          AND (dpt.BottleID IS NOT NULL OR returned.ODTID IS NOT NULL)
     ";
 
     $currentCountStmt = $db->prepare(
@@ -419,7 +424,17 @@ try {
 
     try {
         requireHealthyBottle($db, $bottleId, true);
-        requireBottlePickupCycle($db, $bottleId, $accId, (int) $delivered['ODTID']);
+        $db->prepare('SELECT BottleID FROM bottles WHERE BottleID = ? FOR UPDATE')->execute([$bottleId]);
+        $returnedStmt = $db->prepare("SELECT 1 FROM bottle_scan_event WHERE ODTID = ?
+            AND EventType IN ('UNLOAD_SCAN', 'REFILL_SCAN', 'LOAD_SCAN')
+            AND IsCycleJump = 1 LIMIT 1");
+        $returnedStmt->execute([(int) $delivered['ODTID']]);
+        if ($returnedStmt->fetchColumn()) {
+            throw new DomainException('This bottle has already returned to the station for this delivery.');
+        }
+        $transition = requireScanTransition($db, $bottleId, 'PICKUP_SCAN',
+            $input['jumpReason'] ?? null,
+            array_key_exists('previousScanEventId', $input) ? ($input['previousScanEventId'] ?? 0) : null);
 
         /*
          * Create pickup session if one does not already exist.
@@ -505,6 +520,10 @@ try {
                 BottleID,
                 AccID,
                 EventType,
+                IsCycleJump,
+                PreviousScanEventID,
+                ExpectedPreviousEventType,
+                JumpReason,
                 OrderID,
                 DeliveryID,
                 PickUpID,
@@ -519,6 +538,10 @@ try {
                 :bottleId,
                 :accId,
                 'PICKUP_SCAN',
+                :isCycleJump,
+                :previousScanEventId,
+                :expectedPreviousEventType,
+                :jumpReason,
                 :orderId,
                 :deliveryId,
                 :pickUpId,
@@ -537,6 +560,10 @@ try {
         $scanEventStmt->execute([
             ':bottleId' => $bottleId,
             ':accId' => $accId,
+            ':isCycleJump' => (int) $transition['isCycleJump'],
+            ':previousScanEventId' => $transition['previousScanEventId'],
+            ':expectedPreviousEventType' => $transition['expectedPreviousEventType'],
+            ':jumpReason' => $transition['jumpReason'],
             ':orderId' => $orderId,
             ':deliveryId' => $deliveryId,
             ':pickUpId' => $pickUpId,
@@ -603,15 +630,19 @@ try {
 
     $countSql = "
         SELECT
-            COUNT(DISTINCT dpt.BottleID) AS PickedUpCount
+            COUNT(DISTINCT odt.BottleID) AS PickedUpCount
 
-        FROM pickup p
-
-        INNER JOIN delivery_pickup_transaction dpt
-            ON p.PickUpID = dpt.PickUpID
-
-        WHERE p.DeliveryID = :deliveryId
-          AND p.AccID = :accId
+        FROM order_delivery_transaction odt
+        LEFT JOIN pickup p ON p.DeliveryID = odt.DeliveryID AND p.AccID = :accId
+        LEFT JOIN delivery_pickup_transaction dpt
+            ON dpt.PickUpID = p.PickUpID AND dpt.BottleID = odt.BottleID
+        LEFT JOIN (
+            SELECT DISTINCT ODTID FROM bottle_scan_event
+            WHERE EventType IN ('UNLOAD_SCAN', 'REFILL_SCAN', 'LOAD_SCAN')
+              AND IsCycleJump = 1 AND ODTID IS NOT NULL
+        ) returned ON returned.ODTID = odt.ODTID
+        WHERE odt.DeliveryID = :deliveryId
+          AND (dpt.BottleID IS NOT NULL OR returned.ODTID IS NOT NULL)
     ";
 
     $countStmt = $db->prepare($countSql);
@@ -657,7 +688,7 @@ try {
         ]
     ]);
 
-} catch (BottleConditionConflict $e) {
+} catch (DomainException $e) {
     if ($db !== null && $db->inTransaction()) {
         $db->rollBack();
     }

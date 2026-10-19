@@ -3,6 +3,7 @@
 header('Content-Type: application/json');
 
 require_once '../../config/database.php';
+require_once __DIR__ . '/../../services/account_roles.php';
 
 function respond(
     bool $success,
@@ -165,8 +166,7 @@ try {
 
     $accountStmt = $db->prepare("
         SELECT
-            AccID,
-            AccType
+            AccID
         FROM accounts
         WHERE AccID = :accId
         LIMIT 1
@@ -187,7 +187,7 @@ try {
         );
     }
 
-    if ($account['AccType'] !== 'STATION_WORKER') {
+    if (!accountHasRole($db, $accId, 'STATION_WORKER')) {
 
         respond(
             false,

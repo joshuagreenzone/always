@@ -93,6 +93,8 @@ class RiderService {
     required double latitude,
     required double longitude,
     required double accuracy,
+    String? jumpReason,
+    int? previousScanEventId,
   }) async {
     try {
       final response = await _apiService.dio.post(
@@ -105,6 +107,8 @@ class RiderService {
           'latitude': latitude,
           'longitude': longitude,
           'accuracy': accuracy,
+          'jumpReason': jumpReason,
+          'previousScanEventId': previousScanEventId,
         },
       );
 

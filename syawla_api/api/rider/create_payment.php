@@ -4,6 +4,7 @@
 header('Content-Type: application/json; charset=utf-8');
 
 require_once '../../config/database.php';
+require_once __DIR__ . '/../../services/account_roles.php';
 
 $db = null;
 
@@ -71,7 +72,7 @@ try {
      * Validate receiving account.
      */
     $stmt = $db->prepare("
-        SELECT AccID, AccName, AccType
+        SELECT AccID, AccName
         FROM accounts
         WHERE AccID = :accId
         LIMIT 1
@@ -86,7 +87,7 @@ try {
         ]);
     }
 
-    if (!in_array($account['AccType'], ['ADMIN', 'RIDER'], true)) {
+    if (!accountHasRole($db, $accId, 'ADMIN') && !accountHasRole($db, $accId, 'RIDER')) {
         respond(403, [
             'success' => false,
             'message' => 'This account is not authorized to receive payments.'
@@ -183,7 +184,7 @@ try {
      * For riders, require an assigned delivery.
      * Payment is accepted only after delivery has been closed.
      */
-    if ($account['AccType'] === 'RIDER') {
+    if (accountHasRole($db, $accId, 'RIDER')) {
         $stmt = $db->prepare("
             SELECT DeliveryID, DeliveryStatus
             FROM delivery
@@ -553,7 +554,7 @@ try {
             'outstandingAmount' => max(0, $newOutstanding),
             'paymentStatus' => $paymentStatus,
             'receivedByAccId' => $accId,
-            'receivedByType' => $account['AccType']
+            'receivedByType' => accountHasRole($db, $accId, 'RIDER') ? 'RIDER' : 'ADMIN'
         ]
     ]);
 
