@@ -71,7 +71,7 @@ try {
             bt.BottleType,
             oi.Quantity,
             oi.UnitPrice,
-            (oi.Quantity * oi.UnitPrice) AS ItemTotal
+            COALESCE(oi.LineTotal, oi.Quantity * oi.UnitPrice) AS ItemTotal
         FROM order_items oi
         INNER JOIN bottle_types bt
             ON oi.BottleTypeID = bt.BottleTypeID

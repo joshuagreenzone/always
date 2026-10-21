@@ -66,7 +66,6 @@ class _BottleScannerViewState extends State<BottleScannerView> {
         if (!mounted) return;
         await widget.onDetect(BarcodeCapture(barcodes: [barcode]));
       } finally {
-        await Future<void>.delayed(const Duration(milliseconds: 350));
         if (mounted) setState(() => _processing = false);
       }
       return;

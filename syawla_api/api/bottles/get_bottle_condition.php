@@ -3,6 +3,8 @@
 header('Content-Type: application/json');
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../services/bottle_condition.php';
+require_once __DIR__ . '/../../services/scan_transition.php';
+require_once __DIR__ . '/../../services/bottle_cycle.php';
 
 try {
     $number = trim((string) ($_GET['bottleNumber'] ?? ''));
@@ -16,11 +18,25 @@ try {
     if (!$bottle) {
         throw new OutOfBoundsException('Bottle not found.');
     }
+    // A scanner needs both state and history; return them in one round trip.
+    $eventType = (string) ($_GET['eventType'] ?? '');
+    if ($eventType !== '') {
+        if (!isset(SCAN_EXPECTED_PREVIOUS[$eventType])) {
+            throw new InvalidArgumentException('Invalid scan type.');
+        }
+        $bottle['transition'] = scanTransition($db, $bottle['bottleId'], $eventType);
+        $action = ['LOAD_SCAN' => 'LOAD', 'UNLOAD_SCAN' => 'RETURN', 'DELIVERY_SCAN' => 'DELIVERY'][$eventType] ?? null;
+        // Unhealthy bottles still use the existing recovery dialog first.
+        if ($action !== null && $bottle['condition'] === 'HEALTHY') {
+            requireCycleRider($db, $accId);
+            $bottle['vehicle'] = verifyVehicleBottle($db, $accId, $number, $action, true);
+        }
+    }
     echo json_encode(['success' => true, 'data' => $bottle]);
 } catch (Throwable $e) {
     $status = $e instanceof InvalidArgumentException ? 400
         : ($e instanceof UnexpectedValueException ? 403
-        : ($e instanceof OutOfBoundsException ? 404 : 500));
+        : ($e instanceof OutOfBoundsException ? 404 : ($e instanceof DomainException ? 409 : 500)));
     http_response_code($status);
     if ($status === 500) {
         error_log('Bottle state lookup: ' . $e->getMessage());

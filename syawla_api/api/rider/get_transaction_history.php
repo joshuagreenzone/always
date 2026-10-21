@@ -3,6 +3,7 @@
 header('Content-Type: application/json');
 
 require_once '../../config/database.php';
+require_once __DIR__ . '/../../services/payment_billing.php';
 
 try {
 
@@ -207,6 +208,22 @@ try {
     ]);
 
     $transactions = $stmt->fetchAll();
+
+    $billableByOrder = [];
+    foreach ($transactions as &$transaction) {
+        $historyOrderId = (int) $transaction['OrderID'];
+        if (!isset($billableByOrder[$historyOrderId])) {
+            $billableByOrder[$historyOrderId] = riderBillableAmount($db, $historyOrderId);
+        }
+        $billable = $billableByOrder[$historyOrderId];
+        $paid = round((float) $transaction['PaidAmount'], 2);
+        $transaction['TotalAmount'] = $billable;
+        $transaction['Balance'] = round($billable - $paid, 2);
+        $transaction['PaymentStatus'] = $paid >= $billable
+            ? 'PAID'
+            : ($paid > 0 ? 'PARTIALLY_PAID' : 'UNPAID');
+    }
+    unset($transaction);
 
     echo json_encode([
         'success' => true,

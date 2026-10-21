@@ -15,13 +15,16 @@ Future<bool> checkBottleConditionForScan({
   bool requireRecoveryRefill = false,
   String damagedActionLabel = 'Pick Up Damaged Bottle',
   BottleConditionService? service,
+  BottleCondition? initialCondition,
 }) async {
   final conditionService = service ?? BottleConditionService();
-  final bottle = await conditionService.getCondition(
-    accId: accId,
-    bottleNumber: bottleNumber,
-    allowUnregistered: allowUnregistered,
-  );
+  final bottle =
+      initialCondition ??
+      await conditionService.getCondition(
+        accId: accId,
+        bottleNumber: bottleNumber,
+        allowUnregistered: allowUnregistered,
+      );
   if (!context.mounted) return false;
   if (bottle == null) return true;
   final messenger = ScaffoldMessenger.of(context);

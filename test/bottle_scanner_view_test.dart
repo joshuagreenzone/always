@@ -11,7 +11,7 @@ BarcodeCapture qr(String value) => BarcodeCapture(
 
 void main() {
   testWidgets(
-    'serializes scans and accepts the next bottle after a short cooldown',
+    'serializes scans and accepts the next bottle without a cooldown',
     (tester) async {
       final controller = createBottleScannerController(autoStart: false);
       final pending = Completer<void>();
@@ -37,14 +37,12 @@ void main() {
       expect(scans, ['A']);
       pending.complete();
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 350));
       camera.onDetect!(qr('A'));
       await tester.pump();
       expect(scans, ['A']);
       camera.onDetect!(qr('B'));
       await tester.pump();
       expect(scans, ['A', 'B']);
-      await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpWidget(const SizedBox());
       await controller.dispose();
     },

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../services/batch_scan_location.dart';
+import '../../services/scan_lookup_service.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 import '../../widgets/common/rider_scan_card.dart';
 import '../../widgets/common/scan_jump_dialog.dart';
@@ -40,11 +41,15 @@ class _PendingPickupBottle {
 class PickupScanScreen extends StatefulWidget {
   final Account account;
   final PickupOrder order;
+  final ScanLookupService? lookupService;
+  final BatchScanLocation? batchLocation;
 
   const PickupScanScreen({
     super.key,
     required this.account,
     required this.order,
+    this.lookupService,
+    this.batchLocation,
   });
 
   @override
@@ -63,7 +68,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
   File? _receiptImage;
   String _paymentType = 'CASH';
-  final _batchLocation = BatchScanLocation();
+  late final _batchLocation = widget.batchLocation ?? BatchScanLocation();
+  late final _lookup = widget.lookupService ?? ScanLookupService();
   String? _scanMessage;
   bool _scanSuccess = true;
   bool _isProcessing = false;
@@ -134,11 +140,18 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       _scanMessage = null;
     });
     try {
+      final results = await Future.wait<Object>([
+        _lookup.get(widget.account.accId, bottleNumber, 'PICKUP_SCAN'),
+        _batchLocation.get(),
+      ]);
+      if (!mounted) return;
+      final lookup = results.first as ScanLookup;
       final ready = await checkBottleConditionForScan(
         context: context,
         accId: widget.account.accId,
         bottleNumber: bottleNumber,
         allowDamagedPickup: true,
+        initialCondition: lookup.condition,
       );
       if (!mounted) return;
       if (!ready) {
@@ -153,6 +166,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
         context: context,
         bottleNumber: bottleNumber,
         eventType: 'PICKUP_SCAN',
+        initialTransition: lookup.transition,
       );
       if (!mounted || transition == null) return;
 

@@ -107,13 +107,31 @@ class RiderHomeScreen extends StatelessWidget {
                   iconColor: const Color(0xFF0284C7),
                   title: 'Load for Delivery',
                   description: 'Scan ready bottles into your delivery vehicle.',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          VehicleScanScreen(account: account, returning: false),
-                    ),
-                  ),
+                  onTap: () async {
+                    final message = await Navigator.push<String>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => VehicleScanScreen(
+                          account: account,
+                          returning: false,
+                        ),
+                      ),
+                    );
+                    if (!context.mounted || message == null) return;
+                    await showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Loading Completed'),
+                        content: Text(message),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text('OK'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: AppSpacing.md),
                 _DashboardCard(
@@ -155,13 +173,31 @@ class RiderHomeScreen extends StatelessWidget {
                   iconColor: const Color(0xFF059669),
                   title: 'Return to Station',
                   description: 'Scan collected bottles out of your vehicle at the station.',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          VehicleScanScreen(account: account, returning: true),
-                    ),
-                  ),
+                  onTap: () async {
+                    final message = await Navigator.push<String>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => VehicleScanScreen(
+                          account: account,
+                          returning: true,
+                        ),
+                      ),
+                    );
+                    if (!context.mounted || message == null) return;
+                    await showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Return Completed'),
+                        content: Text(message),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text('OK'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: AppSpacing.md),
                 _DashboardCard(

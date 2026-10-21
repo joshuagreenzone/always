@@ -141,6 +141,18 @@ class _DeliveryConfirmationScreenState
 
       if (!mounted) return;
 
+      await _showMessage(
+        title: _isPartialDelivery
+            ? 'Partial Delivery Saved'
+            : 'Delivery Completed',
+        message: _isPartialDelivery
+            ? 'Order #${widget.order.orderId}: $scannedCount of $orderedCount '
+                  'bottles delivered. The incomplete delivery was recorded successfully.'
+            : 'Order #${widget.order.orderId} was delivered successfully.',
+      );
+
+      if (!mounted) return;
+
       /*
        * The delivery is now recorded. Do not complete it a second time
        * from PaymentScreen.

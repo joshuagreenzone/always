@@ -6,6 +6,7 @@ header('Content-Type: application/json');
 require_once '../../config/database.php';
 require_once __DIR__ . '/../../services/bottle_condition.php';
 require_once __DIR__ . '/../../services/bottle_cycle.php';
+require_once __DIR__ . '/../../services/payment_billing.php';
 
 $db = null;
 
@@ -528,10 +529,7 @@ try {
         ':deliveryId' => $deliveryId
     ]);
 
-    $deliveredAmount = round(
-        (float) $deliveredValueStmt->fetchColumn(),
-        2
-    );
+    $deliveredAmount = riderBillableAmount($db, $orderId);
 
     /*
      * Calculate payments already allocated to this order.

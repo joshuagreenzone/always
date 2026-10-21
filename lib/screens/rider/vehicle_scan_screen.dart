@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../models/account.dart';
 import '../../services/vehicle_bottle_service.dart';
 import '../../services/scan_transition_service.dart';
+import '../../services/scan_lookup_service.dart';
 import '../../services/bottle_condition_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/common/bottle_condition_dialog.dart';
@@ -18,6 +19,7 @@ class VehicleScanScreen extends StatefulWidget {
   final VehicleBottleService? service;
   final BottleConditionService? conditionService;
   final ScanTransitionService? transitionService;
+  final ScanLookupService? lookupService;
   const VehicleScanScreen({
     super.key,
     required this.account,
@@ -25,6 +27,7 @@ class VehicleScanScreen extends StatefulWidget {
     this.service,
     this.conditionService,
     this.transitionService,
+    this.lookupService,
   });
 
   @override
@@ -36,6 +39,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
   final List<String> _pending = [];
   final Map<String, Map<String, dynamic>> _jumpDetails = {};
   late final _service = widget.service ?? VehicleBottleService();
+  late final _lookup = widget.lookupService ?? ScanLookupService();
   List<Map<String, dynamic>> _inventory = [];
   List<Map<String, dynamic>> _returns = [];
   bool _busy = false;
@@ -185,6 +189,15 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
           'Bottle $number is already on your scanned list. You only need to add it once.',
         );
       }
+      final lookup =
+          widget.conditionService == null && widget.transitionService == null
+          ? await _lookup.get(
+              widget.account.accId,
+              number,
+              widget.returning ? 'UNLOAD_SCAN' : 'LOAD_SCAN',
+            )
+          : null;
+      if (!mounted) return;
       if (!await checkBottleConditionForScan(
         context: context,
         accId: widget.account.accId,
@@ -193,21 +206,21 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
         damagedActionLabel: 'Return Damaged Bottle',
         requireRecoveryRefill: !widget.returning,
         service: widget.conditionService,
+        initialCondition: lookup?.condition,
       )) {
         return;
       }
       if (!mounted) return;
-      final bottle = await _service.verify(
-        widget.account.accId,
-        number,
-        _action,
-      );
+      final bottle =
+          lookup?.vehicle ??
+          await _service.verify(widget.account.accId, number, _action);
       if (!mounted) return;
       final transition = await checkScanJump(
         context: context,
         bottleNumber: number,
         eventType: widget.returning ? 'UNLOAD_SCAN' : 'LOAD_SCAN',
         service: widget.transitionService,
+        initialTransition: lookup?.transition,
       );
       if (!mounted || transition == null) return;
       setState(() {
@@ -233,6 +246,11 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
     if (_busy || _pending.isEmpty) return;
     setState(() => _busy = true);
     try {
+      if (_camera) {
+        await _scanner.stop();
+        if (!mounted) return;
+        setState(() => _camera = false);
+      }
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -275,10 +293,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
         _error = null;
         _success = message;
       });
-      await _refresh();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      Navigator.pop(context, message);
     } catch (e) {
       if (mounted) {
         setState(() {

@@ -37,6 +37,27 @@ class DispenserService {
 
   Future<Map<String, dynamic>> inventory() => _request('inventory');
 
+  Future<Map<String, dynamic>> register({
+    required int accId,
+    required String dispenserNumber,
+    required String brand,
+    required String model,
+    required String dispenserAcquisition,
+    required String dispenserPaymentStatus,
+    required double dispenserCost,
+  }) => _request(
+    'register',
+    data: {
+      'accId': accId,
+      'dispenserNumber': dispenserNumber,
+      'brand': brand,
+      'model': model,
+      'dispenserAcquisition': dispenserAcquisition,
+      'dispenserPaymentStatus': dispenserPaymentStatus,
+      'dispenserCost': dispenserCost,
+    },
+  );
+
   Future<Map<String, dynamic>> scan({
     required int accId,
     required String dispenserNumber,

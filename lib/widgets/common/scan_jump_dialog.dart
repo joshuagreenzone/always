@@ -16,11 +16,11 @@ Future<Map<String, dynamic>?> checkScanJump({
   required String bottleNumber,
   required String eventType,
   ScanTransitionService? service,
+  Map<String, dynamic>? initialTransition,
 }) async {
-  final transition = await (service ?? ScanTransitionService()).check(
-    bottleNumber,
-    eventType,
-  );
+  final transition =
+      initialTransition ??
+      await (service ?? ScanTransitionService()).check(bottleNumber, eventType);
   if (!context.mounted) return null;
   if (transition['isCycleJump'] != true) return transition;
 

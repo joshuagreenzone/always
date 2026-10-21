@@ -15,6 +15,7 @@ import '../refill/refill_screen.dart';
 import '../refill/refilled_bottles_screen.dart';
 
 import 'bottle_registration_screen.dart';
+import 'dispenser_registration_screen.dart';
 import '../rider/dispenser_scan_screen.dart';
 
 class StationWorkerHomeScreen extends StatelessWidget {
@@ -204,6 +205,21 @@ class StationWorkerHomeScreen extends StatelessWidget {
                       ),
                     );
                   },
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _DashboardCard(
+                  icon: Icons.qr_code_scanner_rounded,
+                  iconColor: const Color(0xFF0E7490),
+                  title: 'Dispenser Registration',
+                  description:
+                      'Scan a dispenser QR code and enter its details.',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          DispenserRegistrationScreen(account: account),
+                    ),
+                  ),
                 ),
               ]),
             ),

@@ -3,6 +3,7 @@
 header('Content-Type: application/json');
 
 require_once '../../config/database.php';
+require_once __DIR__ . '/../../services/payment_billing.php';
 
 try {
 
@@ -97,7 +98,7 @@ try {
             oi.Quantity,
             oi.UnitPrice,
 
-            (oi.Quantity * oi.UnitPrice) AS ItemTotal
+            COALESCE(oi.LineTotal, oi.Quantity * oi.UnitPrice) AS ItemTotal
 
         FROM order_items oi
 
@@ -175,6 +176,11 @@ try {
 
     $order['items'] =
         $items;
+
+    $paidStatement = $db->prepare('SELECT COALESCE(SUM(Amount), 0) FROM order_payment_transaction WHERE OrderID = ?');
+    $paidStatement->execute([$orderId]);
+    $order['PaidAmount'] = round((float) $paidStatement->fetchColumn(), 2);
+    $order['OutstandingAmount'] = max(0, round(riderBillableAmount($db, $orderId) - $order['PaidAmount'], 2));
 
     /*
      * =========================================================

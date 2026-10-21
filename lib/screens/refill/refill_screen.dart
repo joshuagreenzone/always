@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/batch_scan_location.dart';
+import '../../services/scan_lookup_service.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 import '../../widgets/common/scan_jump_dialog.dart';
 
@@ -29,6 +30,7 @@ class _RefillScreenState extends State<RefillScreen> {
       createBottleScannerController();
 
   final _batchLocation = BatchScanLocation();
+  final _lookup = ScanLookupService();
   final List<Bottle> _batch = [];
   final Set<String> _batchNumbers = {};
   final Map<String, Map<String, dynamic>> _jumpDetails = {};
@@ -80,10 +82,17 @@ class _RefillScreenState extends State<RefillScreen> {
     });
 
     try {
+      final results = await Future.wait<Object>([
+        _lookup.get(widget.account.accId, number, 'REFILL_SCAN'),
+        _batchLocation.get(),
+      ]);
+      if (!mounted) return;
+      final lookup = results.first as ScanLookup;
       final ready = await checkBottleConditionForScan(
         context: context,
         accId: widget.account.accId,
         bottleNumber: number,
+        initialCondition: lookup.condition,
       );
       if (!mounted) return;
       if (!ready) {
@@ -97,6 +106,7 @@ class _RefillScreenState extends State<RefillScreen> {
         context: context,
         bottleNumber: bottle.bottleNumber,
         eventType: 'REFILL_SCAN',
+        initialTransition: lookup.transition,
       );
       if (!mounted || transition == null) return;
 

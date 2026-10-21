@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../services/batch_scan_location.dart';
+import '../../services/scan_lookup_service.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 import '../../widgets/common/rider_scan_card.dart';
 import '../../widgets/common/scan_jump_dialog.dart';
@@ -16,11 +17,17 @@ import 'delivery_confirmation_screen.dart';
 class DeliveryScanScreen extends StatefulWidget {
   final Account account;
   final OrderDetails order;
+  final ScanLookupService? lookupService;
+  final BatchScanLocation? batchLocation;
+  final VehicleBottleService? vehicleService;
 
   const DeliveryScanScreen({
     super.key,
     required this.account,
     required this.order,
+    this.lookupService,
+    this.batchLocation,
+    this.vehicleService,
   });
 
   @override
@@ -33,7 +40,9 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
 
   final List<_PendingDeliveryBottle> _scannedBottles = [];
 
-  final _batchLocation = BatchScanLocation();
+  late final _batchLocation = widget.batchLocation ?? BatchScanLocation();
+  late final _lookup = widget.lookupService ?? ScanLookupService();
+  late final _vehicleService = widget.vehicleService ?? VehicleBottleService();
   String? _scanMessage;
   bool _scanSuccess = true;
   bool _isProcessing = false;
@@ -73,11 +82,20 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
       _scanMessage = null;
     });
     try {
+      // Start GPS on the first scan while the bottle lookup is in flight.
+      // Future.wait observes both errors; later scans reuse the same GPS fix.
+      final results = await Future.wait<Object>([
+        _lookup.get(widget.account.accId, bottleNumber, 'DELIVERY_SCAN'),
+        _batchLocation.get(),
+      ]);
+      if (!mounted) return;
+      final lookup = results.first as ScanLookup;
       final ready = await checkBottleConditionForScan(
         context: context,
         accId: widget.account.accId,
         bottleNumber: bottleNumber,
         requireRecoveryRefill: true,
+        initialCondition: lookup.condition,
       );
       if (!mounted) return;
       if (!ready) {
@@ -87,16 +105,19 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
         });
         return;
       }
-      await VehicleBottleService().verify(
-        widget.account.accId,
-        bottleNumber,
-        'DELIVERY',
-      );
+      if (lookup.vehicle == null) {
+        await _vehicleService.verify(
+          widget.account.accId,
+          bottleNumber,
+          'DELIVERY',
+        );
+      }
       if (!mounted) return;
       final transition = await checkScanJump(
         context: context,
         bottleNumber: bottleNumber,
         eventType: 'DELIVERY_SCAN',
+        initialTransition: lookup.transition,
       );
       if (!mounted || transition == null) return;
       final position = await _batchLocation.get();

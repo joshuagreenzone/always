@@ -5,6 +5,7 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once '../../config/database.php';
 require_once __DIR__ . '/../../services/account_roles.php';
+require_once __DIR__ . '/../../services/payment_billing.php';
 
 $db = null;
 
@@ -381,7 +382,9 @@ try {
         ]);
     }
 
-    $deliveredAmount = round($deliveredAmount, 2);
+    // Keep item matching above as a safety check, but charge the saved promo
+    // bundles for delivered quantities, exactly as web finance does.
+    $deliveredAmount = riderBillableAmount($db, $orderId);
 
     if ($deliveredQuantity <= 0 || $deliveredAmount <= 0) {
         rollbackIfNeeded($db);

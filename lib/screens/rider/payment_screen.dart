@@ -15,12 +15,14 @@ class PaymentScreen extends StatefulWidget {
   final Account account;
   final OrderDetails order;
   final List<Map<String, dynamic>> scannedBottles;
+  final RiderService? riderService;
 
   const PaymentScreen({
     super.key,
     required this.account,
     required this.order,
     required this.scannedBottles,
+    this.riderService,
   });
 
   @override
@@ -28,7 +30,7 @@ class PaymentScreen extends StatefulWidget {
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  final RiderService _riderService = RiderService();
+  late final RiderService _riderService = widget.riderService ?? RiderService();
   final ImagePicker _imagePicker = ImagePicker();
 
   final TextEditingController _amountController = TextEditingController();
@@ -39,6 +41,46 @@ class _PaymentScreenState extends State<PaymentScreen> {
   File? _receiptImage;
   bool _isProcessing = false;
   bool _finished = false;
+  bool _loadingBalance = true;
+  double? _remainingBalance;
+  String? _balanceError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBalance();
+  }
+
+  Future<void> _loadBalance() async {
+    setState(() {
+      _loadingBalance = true;
+      _balanceError = null;
+    });
+    try {
+      final order = await _riderService.getOrderDetails(
+        orderId: widget.order.orderId,
+        accId: widget.account.accId,
+      );
+      final balance = order.outstandingAmount;
+      if (balance == null || !balance.isFinite || balance < 0) {
+        throw Exception('Remaining balance is unavailable. Please try again.');
+      }
+      if (!mounted) return;
+      setState(() {
+        _remainingBalance = balance;
+        _amountController.text = balance.toStringAsFixed(2);
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              _balanceError = error.toString().replaceFirst('Exception: ', ''),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingBalance = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -74,12 +116,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   Future<void> _submitPayment() async {
-    if (_isProcessing || _finished) return;
+    if (_isProcessing ||
+        _finished ||
+        _loadingBalance ||
+        _remainingBalance == null) {
+      return;
+    }
 
     final amount = double.tryParse(_amountController.text.trim());
 
     if (amount == null || !amount.isFinite || amount <= 0) {
       _showMessage('Invalid Amount', 'Please enter a valid payment amount.');
+      return;
+    }
+
+    if (amount > _remainingBalance!) {
+      await _showMessage(
+        'Invalid Amount',
+        'Payment exceeds the remaining balance.',
+      );
       return;
     }
 
@@ -151,6 +206,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     if (confirmed != true || !mounted) return;
 
+    final isPartial = widget.scannedBottles.length < widget.order.totalQuantity;
+    await _showMessage(
+      isPartial ? 'Partial Delivery Saved' : 'Delivery Completed',
+      'Order #${widget.order.orderId} ${isPartial ? 'partial delivery was recorded' : 'was delivered'} '
+      'successfully. No payment was received. Any outstanding balance remains due.',
+    );
+
+    if (!mounted) return;
     await _finishAndReturn();
   }
 
@@ -232,10 +295,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
-  void _showMessage(String title, String message) {
+  Future<void> _showMessage(String title, String message) async {
     if (!mounted) return;
 
-    showDialog<void>(
+    await showDialog<void>(
       context: context,
       builder: (_) => AlertDialog(
         title: Text(title),
@@ -276,7 +339,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: _isProcessing || _finished
+                    onPressed:
+                        _isProcessing ||
+                            _finished ||
+                            _loadingBalance ||
+                            _balanceError != null ||
+                            (_remainingBalance ?? 0) <= 0
                         ? null
                         : _submitPayment,
                     icon: _isProcessing
@@ -333,6 +401,46 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   style: AppTextStyles.dashboardTitle,
                 ),
               ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(AppSizes.radiusMd),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.primary,
+                  width: 2,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Remaining Balance',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  if (_loadingBalance)
+                    const LinearProgressIndicator()
+                  else if (_balanceError != null) ...[
+                    Text(_balanceError!),
+                    TextButton(
+                      onPressed: _loadBalance,
+                      child: const Text('Retry'),
+                    ),
+                  ] else
+                    Text(
+                      '\u20b1${_remainingBalance!.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                ],
+              ),
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
@@ -397,7 +505,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
             const SizedBox(height: AppSpacing.md),
             TextField(
               controller: _amountController,
-              enabled: !_isProcessing,
+              enabled:
+                  !_isProcessing && !_loadingBalance && _balanceError == null,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),

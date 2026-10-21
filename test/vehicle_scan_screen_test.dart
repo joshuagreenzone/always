@@ -134,6 +134,75 @@ final _account = Account(
 );
 
 void main() {
+  for (final returning in [false, true]) {
+    testWidgets(
+      'Confirmed ${returning ? 'return' : 'loading'} returns home with a success message',
+      (tester) async {
+        final service = _InventoryService();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: TextButton(
+                  child: const Text('Open loading'),
+                  onPressed: () async {
+                    final message = await Navigator.push<String>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => VehicleScanScreen(
+                          account: _account,
+                          returning: returning,
+                          service: service,
+                          conditionService: _HealthyConditionService(),
+                          transitionService: _TransitionService(),
+                        ),
+                      ),
+                    );
+                    if (!context.mounted || message == null) return;
+                    await showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Loading Completed'),
+                        content: Text(message),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text('OK'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Open loading'));
+        await tester.pumpAndSettle();
+        await _enterBottle(tester);
+        await tester.tap(
+          find.text(returning ? 'Confirm Return (1)' : 'Confirm Loading (1)'),
+        );
+        await tester.pumpAndSettle();
+        expect(service.saves, 0);
+        await tester.tap(find.text('Confirm'));
+        await tester.pumpAndSettle();
+        expect(service.savedAction, returning ? 'RETURN' : 'LOAD');
+        expect(find.byType(VehicleScanScreen), findsNothing);
+        expect(find.text('Open loading'), findsOneWidget);
+        expect(
+          find.text(
+            returning
+                ? '1 bottle returned to the station. Saved successfully.'
+                : '1 bottle loaded for delivery. Saved successfully.',
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+  }
+
   testWidgets(
     'Return screen counts only collected bottles and shows confirmed arrivals',
     (tester) async {
@@ -224,19 +293,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(service.savedAction, 'RETURN');
       expect(service.savedNumbers, ['COLLECTED-2']);
-      expect(
-        find.textContaining(
-          '1 bottle returned to the station. Saved successfully.',
-        ),
-        findsWidgets,
-      );
-      expect(find.text('No bottles scanned yet.'), findsOneWidget);
-      expect(find.textContaining('/200'), findsNothing);
-      expect(find.text('Awaiting station return: 1'), findsOneWidget);
-      await tester.ensureVisible(find.text('View Return Inventory'));
-      await tester.tap(find.text('View Return Inventory'));
-      await tester.pumpAndSettle();
-      expect(find.text('1 bottle returned'), findsOneWidget);
     },
   );
 
@@ -304,8 +360,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
-    expect(find.text('No bottles scanned yet.'), findsOneWidget);
-    expect(find.textContaining('/200'), findsNothing);
+    expect(service.saves, 2);
+    expect(service.savedAction, 'RETURN');
+    expect(service.savedNumbers, ['COLLECTED-2']);
   });
 
   testWidgets('Return layout fits a small phone with large text', (

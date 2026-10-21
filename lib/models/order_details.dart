@@ -43,6 +43,7 @@ class OrderDetails {
   final double totalAmount;
 
   final DateTime orderDateTime;
+  final double? outstandingAmount;
   final String orderStatus;
   final String paymentStatus;
 
@@ -63,6 +64,7 @@ class OrderDetails {
     required this.deliveryId,
     required this.deliveryDateTime,
     required this.deliveryStatus,
+    this.outstandingAmount,
   });
 
   factory OrderDetails.fromJson(Map<String, dynamic> json) {
@@ -109,6 +111,7 @@ class OrderDetails {
       deliveryDateTime: DateTime.parse(json['DeliveryDateTime'].toString()),
 
       deliveryStatus: json['DeliveryStatus'].toString(),
+      outstandingAmount: double.tryParse('${json['OutstandingAmount']}'),
     );
   }
 }
