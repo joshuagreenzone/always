@@ -38,11 +38,13 @@ class BottleBatchRegistrationResult {
 }
 
 class BottleService {
-  final ApiService _apiService = ApiService();
+  final Dio _dio;
+
+  BottleService({Dio? dio}) : _dio = dio ?? ApiService().dio;
 
   Future<List<Bottle>> getBottles() async {
     try {
-      final response = await _apiService.dio.get('api/bottles/get_bottles.php');
+      final response = await _dio.get('api/bottles/get_bottles.php');
 
       final responseData = Map<String, dynamic>.from(response.data);
 
@@ -54,11 +56,11 @@ class BottleService {
 
       final dynamic data = responseData['data'];
 
-      if (data is! Map) {
-        throw Exception('Invalid response from server.');
-      }
-
-      final dynamic rawBottles = data['bottles'];
+      final dynamic rawBottles = data is List
+          ? data
+          : data is Map
+          ? data['bottles']
+          : null;
 
       if (rawBottles is! List) {
         throw Exception('Invalid bottle data returned by server.');
@@ -84,9 +86,7 @@ class BottleService {
 
   Future<List<BottleType>> getBottleTypes() async {
     try {
-      final response = await _apiService.dio.get(
-        'api/bottles/get_bottle_types.php',
-      );
+      final response = await _dio.get('api/bottles/get_bottle_types.php');
 
       final responseData = Map<String, dynamic>.from(response.data);
 
@@ -133,9 +133,10 @@ class BottleService {
     String? bottleBrand,
     required String bottleCondition,
     required double bottleCost,
+    String bottleOwner = 'COMPANY',
   }) async {
     try {
-      final response = await _apiService.dio.post(
+      final response = await _dio.post(
         'api/bottles/register_bottle.php',
         data: {
           'accId': accId,
@@ -144,6 +145,7 @@ class BottleService {
           'bottleBrand': bottleBrand ?? '',
           'bottleCondition': bottleCondition,
           'bottleCost': bottleCost,
+          'bottleOwner': bottleOwner,
         },
       );
 
@@ -190,6 +192,7 @@ class BottleService {
     String? bottleBrand,
     required String bottleCondition,
     required double bottleCost,
+    String bottleOwner = 'COMPANY',
   }) async {
     if (bottleNumbers.isEmpty) {
       throw const BottleBatchRegistrationException(
@@ -198,7 +201,7 @@ class BottleService {
     }
 
     try {
-      final response = await _apiService.dio.post(
+      final response = await _dio.post(
         'api/bottles/register_bottles_batch.php',
         data: {
           'accId': accId,
@@ -206,6 +209,7 @@ class BottleService {
           'bottleBrand': bottleBrand ?? '',
           'bottleCondition': bottleCondition,
           'bottleCost': bottleCost,
+          'bottleOwner': bottleOwner,
           'bottles': bottleNumbers,
         },
       );

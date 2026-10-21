@@ -13,6 +13,7 @@ try {
         SELECT
             b.BottleID,
             b.BottleNumber,
+            b.BottleOwner,
             b.BottleTypeID,
             bt.BottleType,
             bt.Price,
@@ -27,10 +28,14 @@ try {
     $stmt->execute();
 
     $bottles = $stmt->fetchAll();
+    $counts = $db->query("SELECT COUNT(*) AS totalBottles,
+        COALESCE(SUM(BottleOwner = 'COMPANY'), 0) AS companyBottles,
+        COALESCE(SUM(BottleOwner = 'CUSTOMER'), 0) AS customerBottles FROM bottles")->fetch(PDO::FETCH_ASSOC);
 
     echo json_encode([
         "success" => true,
-        "data" => $bottles
+        "data" => $bottles,
+        "summary" => array_map('intval', $counts)
     ]);
 
 } catch (PDOException $e) {

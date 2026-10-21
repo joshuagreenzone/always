@@ -14,7 +14,7 @@ function requireBottleConditionAccount(PDO $db, int $accId): void
 function getBottleCondition(PDO $db, string $number, bool $lock = false): ?array
 {
     $stmt = $db->prepare('
-        SELECT BottleID, BottleNumber, BottleCondition
+        SELECT BottleID, BottleNumber, BottleCondition, BottleOwner
         FROM bottles WHERE BottleNumber = :number LIMIT 1
         ' . ($lock ? 'FOR UPDATE' : ''));
     $stmt->execute([':number' => $number]);
@@ -33,6 +33,7 @@ function getBottleCondition(PDO $db, string $number, bool $lock = false): ?array
     return [
         'bottleId' => (int) $bottle['BottleID'],
         'bottleNumber' => $bottle['BottleNumber'],
+        'bottleOwner' => $bottle['BottleOwner'],
         'condition' => $bottle['BottleCondition'],
         'note' => $history['Note'] ?? null,
         'updatedAt' => $history['UpdatedAt'] ?? null,

@@ -129,6 +129,8 @@ class _DispenserScanScreenState extends State<DispenserScanScreen> {
     setState(() {
       _camera = false;
       _number = value;
+      _customerId = null;
+      _reason.clear();
       _error = null;
       _success = null;
     });
@@ -266,7 +268,7 @@ class _DispenserScanScreenState extends State<DispenserScanScreen> {
                 ? null
                 : (value) => setState(() {
                     _action = value!;
-                    _customerId = null;
+                    _reason.clear();
                   }),
           ),
           const SizedBox(height: 16),
@@ -310,13 +312,14 @@ class _DispenserScanScreenState extends State<DispenserScanScreen> {
                 ),
               ),
             ],
-            if (_action == 'DELIVERY_SCAN' || _action == 'PICKUP_SCAN') ...[
+            if (_action != 'MAINTENANCE') ...[
               const SizedBox(height: 12),
               DropdownButtonFormField<int>(
                 initialValue:
                     _customerId ??
                     int.tryParse('${selected['CurrentCustomerID'] ?? ''}'),
                 decoration: const InputDecoration(labelText: 'Customer'),
+                key: ValueKey('customer-$_number-$_action'),
                 items: customers
                     .map(
                       (c) => DropdownMenuItem(
@@ -325,7 +328,9 @@ class _DispenserScanScreenState extends State<DispenserScanScreen> {
                       ),
                     )
                     .toList(),
-                onChanged: (value) => setState(() => _customerId = value),
+                onChanged: _busy
+                    ? null
+                    : (value) => setState(() => _customerId = value),
               ),
             ],
             if (_action == 'MAINTENANCE') ...[

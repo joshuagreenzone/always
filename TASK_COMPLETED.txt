@@ -206,3 +206,44 @@ Validation:
 - Flutter analysis: no errors in changed files; 61 existing project notices remain.
 - Formatted changed Dart files; git diff --check found no whitespace errors.
 - Live camera scanning and payment flows still require phone verification.
+
+Task Completed: Assigned Bottle and Dispenser Deliveries
+Date: 2026-10-19
+
+- Renamed the rider dashboard action and assignment screen to Assigned Deliveries.
+- Displayed dispenser assignments alongside bottle orders, including when no
+  bottle orders are assigned. Bottle cards are labelled Bottle Delivery.
+- Dispenser cards show the dispenser number, brand/model, customer, linked
+  bottle order, delivery status, and delivery notes.
+- Added Scan Dispenser Delivery to open the scanner for the assigned dispenser
+  and customer, with delivery action and assigned customer selection locked.
+- Reject scans of a different dispenser and preserve the assigned customer
+  after saving. Refresh assignments when returning from the scanner.
+- Read dispenserAssignments from the existing assigned-orders API response.
+- Added a widget test for dispenser-only assignments and updated rider dashboard
+  role tests for the Assigned Deliveries label.
+
+Validation:
+- Reviewed the current Dart changes and regression test source for this entry.
+- Application tests were not run as part of this documentation update.
+- Live dispenser camera scanning and delivery confirmation require manual
+  verification against the development API.
+
+Follow-up Completed: Use Dispenser Scans for Dispenser Movements
+Date: 2026-10-19
+
+- Removed dispenser cards and scanner links from Assigned Deliveries; this
+  screen now lists bottle orders only. Dispensers use Dispenser Scans.
+- Enabled customer selection for loading, delivery, pickup, and station return.
+- API honors the selected customer instead of overriding pickup/loading/return
+  selections with the existing tag. Loading and pickup retain the customer tag;
+  station return records the customer on the scan and clears the active tag.
+- Preserved required skipped-scan notes in the UI and transactional API checks.
+- Maintenance remains available at any lifecycle stage without a jump check.
+- Removed the assignment-specific scanner restrictions and reset notes/customer
+  selection when scanning another dispenser.
+
+Validation:
+- All three affected assignment and rider-role widget tests passed.
+- PHP syntax check passed for dispenser_workflow.php.
+- Camera scanning, customer changes, and maintenance require device/API checks.

@@ -16,15 +16,20 @@ import 'order_details_screen.dart';
 
 class AssignedOrdersScreen extends StatefulWidget {
   final Account account;
+  final RiderService? riderService;
 
-  const AssignedOrdersScreen({super.key, required this.account});
+  const AssignedOrdersScreen({
+    super.key,
+    required this.account,
+    this.riderService,
+  });
 
   @override
   State<AssignedOrdersScreen> createState() => _AssignedOrdersScreenState();
 }
 
 class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
-  final RiderService _riderService = RiderService();
+  late final RiderService _riderService = widget.riderService ?? RiderService();
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -51,6 +56,7 @@ class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
 
       setState(() {
         _orders = orders;
+
         _isLoading = false;
       });
     } catch (e) {
@@ -66,7 +72,7 @@ class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Assigned Orders')),
+      appBar: AppBar(title: const Text('Assigned Deliveries')),
       body: _buildBody(),
     );
   }
@@ -87,6 +93,7 @@ class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
     return RefreshIndicator(
       onRefresh: _loadOrders,
       child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSizes.screenPadding),
         itemCount: _orders.length,
         separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
@@ -116,7 +123,7 @@ class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
           const SizedBox(height: AppSpacing.md),
 
           Center(
-            child: Text('No assigned orders.', style: AppTextStyles.title),
+            child: Text('No assigned deliveries.', style: AppTextStyles.title),
           ),
 
           const SizedBox(height: AppSpacing.sm),
@@ -152,7 +159,10 @@ class _AssignedOrdersScreenState extends State<AssignedOrdersScreen> {
           const SizedBox(height: AppSpacing.md),
 
           Center(
-            child: Text('Unable to load orders', style: AppTextStyles.title),
+            child: Text(
+              'Unable to load deliveries',
+              style: AppTextStyles.title,
+            ),
           ),
 
           const SizedBox(height: AppSpacing.sm),
@@ -196,7 +206,7 @@ class _OrderCard extends StatelessWidget {
             Row(
               children: [
                 const IconBadge(
-                  icon: Icons.receipt_long,
+                  icon: Icons.water_drop_outlined,
                   color: AppColors.primary,
                 ),
 
@@ -204,7 +214,7 @@ class _OrderCard extends StatelessWidget {
 
                 Expanded(
                   child: Text(
-                    'Order #${order.orderId}',
+                    'Bottle Delivery\nOrder #${order.orderId}',
                     style: AppTextStyles.dashboardTitle,
                   ),
                 ),

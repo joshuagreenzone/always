@@ -1,6 +1,10 @@
 class BottleRegistration {
   final int bottleId;
   final String bottleNumber;
+  final String bottleOwner;
+
+  String get ownerLabel =>
+      bottleOwner == 'CUSTOMER' ? 'Customer bottle' : 'Company bottle';
   final int bottleTypeId;
   final String bottleType;
   final String bottleBrand;
@@ -11,6 +15,7 @@ class BottleRegistration {
   BottleRegistration({
     required this.bottleId,
     required this.bottleNumber,
+    this.bottleOwner = 'COMPANY',
     required this.bottleTypeId,
     required this.bottleType,
     required this.bottleBrand,
@@ -21,6 +26,7 @@ class BottleRegistration {
 
   factory BottleRegistration.fromJson(Map<String, dynamic> json) {
     return BottleRegistration(
+      bottleOwner: json['bottleOwner']?.toString() ?? 'COMPANY',
       bottleId: _parseInt(json['bottleId']),
       bottleNumber: json['bottleNumber']?.toString() ?? '',
       bottleTypeId: _parseInt(json['bottleTypeId']),

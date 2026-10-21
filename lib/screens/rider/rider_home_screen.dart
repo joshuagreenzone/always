@@ -119,8 +119,8 @@ class RiderHomeScreen extends StatelessWidget {
                 _DashboardCard(
                   icon: Icons.local_shipping_rounded,
                   iconColor: const Color(0xFF0284C7),
-                  title: 'Assigned Orders',
-                  description: 'View orders assigned to you for delivery.',
+                  title: 'Assigned Deliveries',
+                  description: 'View your assigned bottle deliveries.',
                   onTap: () {
                     Navigator.push(
                       context,

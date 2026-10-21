@@ -9,6 +9,7 @@ import 'api_service.dart';
 
 class RiderService {
   final ApiService _apiService = ApiService();
+  List<Map<String, dynamic>> dispenserAssignments = [];
 
   // ============================================================
   // ASSIGNED ORDERS
@@ -29,6 +30,10 @@ class RiderService {
       }
 
       final List<dynamic> data = response.data['data'] ?? [];
+      dispenserAssignments =
+          (response.data['dispenserAssignments'] as List? ?? [])
+              .map((item) => Map<String, dynamic>.from(item as Map))
+              .toList();
 
       return data
           .map(

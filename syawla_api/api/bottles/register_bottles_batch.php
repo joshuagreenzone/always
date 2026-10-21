@@ -53,6 +53,11 @@ try {
         ? trim((string) $input['bottleCondition'])
         : '';
 
+    $bottleOwner = strtoupper(trim((string) ($input['bottleOwner'] ?? 'COMPANY')));
+    if (!in_array($bottleOwner, ['COMPANY', 'CUSTOMER'], true)) {
+        respond(false, 'Select Company or Customer as the bottle owner.', 400);
+    }
+
     $bottleCost = isset($input['bottleCost'])
         ? (float) $input['bottleCost']
         : 0.00;
@@ -335,6 +340,7 @@ try {
                     BottleTypeID,
                     BottleBrand,
                     BottleAcquisition,
+                    BottleOwner,
                     BottleCost,
                     BottleRegDateTime
                 )
@@ -344,6 +350,7 @@ try {
                     :bottleTypeId,
                     :bottleBrand,
                     :bottleCondition,
+                    :bottleOwner,
                     :bottleCost,
                     NOW()
                 )
@@ -352,6 +359,7 @@ try {
             foreach ($newBottleNumbers as $bottleNumber) {
 
                 $insertStmt->execute([
+                    ':bottleOwner' => $bottleOwner,
                     ':bottleNumber' => $bottleNumber,
 
                     ':bottleTypeId' => $bottleTypeId,
@@ -388,6 +396,8 @@ try {
                         $bottleBrand !== ''
                             ? $bottleBrand
                             : null,
+
+                    'bottleOwner' => $bottleOwner,
 
                     'bottleCondition' =>
                         $bottleCondition,

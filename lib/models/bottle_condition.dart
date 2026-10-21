@@ -2,6 +2,10 @@ class BottleCondition {
   static const states = ['HEALTHY', 'MISSING', 'DAMAGED'];
 
   final String bottleNumber;
+  final String bottleOwner;
+
+  String get ownerLabel =>
+      bottleOwner == 'CUSTOMER' ? 'Customer bottle' : 'Company bottle';
   final String condition;
   final String? note;
   final DateTime? updatedAt;
@@ -9,6 +13,7 @@ class BottleCondition {
 
   const BottleCondition({
     required this.bottleNumber,
+    this.bottleOwner = 'COMPANY',
     required this.condition,
     this.note,
     this.updatedAt,
@@ -23,6 +28,7 @@ class BottleCondition {
       throw const FormatException('Invalid bottle state returned by server.');
     }
     return BottleCondition(
+      bottleOwner: json['bottleOwner']?.toString() ?? 'COMPANY',
       bottleNumber: json['bottleNumber'].toString(),
       condition: condition!,
       note: json['note']?.toString(),

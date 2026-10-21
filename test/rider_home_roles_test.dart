@@ -21,7 +21,7 @@ void main() {
         home: HomeScreen(account: account(['STATION_WORKER', 'RIDER'])),
       ),
     );
-    expect(find.text('Assigned Orders'), findsOneWidget);
+    expect(find.text('Assigned Deliveries'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Refill'), 250);
     expect(find.text('Refill'), findsOneWidget);
   });
@@ -30,7 +30,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: HomeScreen(account: account(['RIDER']))),
     );
-    expect(find.text('Assigned Orders'), findsOneWidget);
+    expect(find.text('Assigned Deliveries'), findsOneWidget);
     expect(find.text('Refill'), findsNothing);
   });
 }

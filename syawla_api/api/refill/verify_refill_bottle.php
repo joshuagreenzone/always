@@ -9,7 +9,7 @@ try {
     if ($number === '') throw new InvalidArgumentException('Bottle number is required.');
     $db = (new Database())->connect();
     $stmt = $db->prepare('SELECT b.BottleID, b.BottleNumber, b.BottleTypeID,
-        b.BottleRegDateTime, bt.BottleType, bt.Price
+        b.BottleRegDateTime, b.BottleOwner, bt.BottleType, bt.Price
         FROM bottles b INNER JOIN bottle_types bt ON bt.BottleTypeID = b.BottleTypeID
         WHERE b.BottleNumber = ? LIMIT 1');
     $stmt->execute([$number]);

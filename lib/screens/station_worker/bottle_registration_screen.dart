@@ -7,8 +7,13 @@ import 'bottle_registration_scan_screen.dart';
 
 class BottleRegistrationScreen extends StatefulWidget {
   final Account account;
+  final BottleService? bottleService;
 
-  const BottleRegistrationScreen({super.key, required this.account});
+  const BottleRegistrationScreen({
+    super.key,
+    required this.account,
+    this.bottleService,
+  });
 
   @override
   State<BottleRegistrationScreen> createState() =>
@@ -16,7 +21,8 @@ class BottleRegistrationScreen extends StatefulWidget {
 }
 
 class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
-  final BottleService _bottleService = BottleService();
+  late final BottleService _bottleService =
+      widget.bottleService ?? BottleService();
 
   final TextEditingController _brandController = TextEditingController();
 
@@ -35,6 +41,7 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
   BottleType? _selectedBottleType;
 
   String _selectedCondition = 'BRAND_NEW';
+  String _selectedOwner = 'COMPANY';
 
   bool _isLoadingTypes = true;
   bool _isRegistering = false;
@@ -255,6 +262,10 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
                       : 'Second Hand',
                 ),
                 const SizedBox(height: 12),
+                Text(
+                  'Owner: ${_selectedOwner == 'CUSTOMER' ? 'Customer bottle' : 'Company bottle'}',
+                ),
+                const SizedBox(height: 12),
                 Text('Cost', style: Theme.of(context).textTheme.labelMedium),
                 const SizedBox(height: 4),
                 Text(cost.toStringAsFixed(2)),
@@ -311,6 +322,7 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
         bottleBrand: _brandController.text.trim(),
         bottleCondition: _selectedCondition,
         bottleCost: cost,
+        bottleOwner: _selectedOwner,
       );
 
       if (!mounted) return;
@@ -632,6 +644,34 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
                             onChanged: _isRegistering
                                 ? null
                                 : _onBottleTypeChanged,
+                          ),
+                          const SizedBox(height: 16),
+                          DropdownButtonFormField<String>(
+                            initialValue: _selectedOwner,
+                            decoration: const InputDecoration(
+                              labelText: 'Bottle owner',
+                              helperText:
+                                  'Both types use QR movement tracking.',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.person_outline),
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'COMPANY',
+                                child: Text('Company bottle'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'CUSTOMER',
+                                child: Text('Customer bottle'),
+                              ),
+                            ],
+                            onChanged: _isRegistering
+                                ? null
+                                : (value) {
+                                    if (value != null) {
+                                      setState(() => _selectedOwner = value);
+                                    }
+                                  },
                           ),
                           const SizedBox(height: 16),
                           TextFormField(

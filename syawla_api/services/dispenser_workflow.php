@@ -116,10 +116,11 @@ final class DispenserWorkflow
             if ($event === 'DELIVERY_SCAN') {
                 if ($customer <= 0 || !$this->one('SELECT 1 FROM customers WHERE CustomerID = ?', [$customer])) throw new InvalidArgumentException('Select the customer receiving this dispenser.');
             } elseif ($event === 'PICKUP_SCAN') {
-                $customer = (int) $d['CurrentCustomerID'] ?: $customer;
+                $customer = $customer ?: (int) $d['CurrentCustomerID'];
                 if ($customer <= 0 || !$this->one('SELECT 1 FROM customers WHERE CustomerID = ?', [$customer])) throw new InvalidArgumentException('Select the customer from whom this dispenser was picked up.');
             } else {
-                $customer = (int) $d['CurrentCustomerID'];
+                $customer = $customer ?: (int) $d['CurrentCustomerID'];
+                if ($customer > 0 && !$this->one('SELECT 1 FROM customers WHERE CustomerID = ?', [$customer])) throw new InvalidArgumentException('Select a valid customer.');
             }
             $this->db->prepare('INSERT INTO dispenser_scan_event (DispenserID, AccID, EventType, CustomerID, PreviousScanEventID, ExpectedPreviousEventType, IsCycleJump, JumpReason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
                 ->execute([$d['DispenserID'], $actor, $event, $customer ?: null, $previous['ScanEventID'] ?? null,
@@ -143,7 +144,7 @@ final class DispenserWorkflow
                 $this->db->prepare('INSERT INTO dispenser_deployment (DispenserID, CustomerID, DeliveredScanEventID, DeliveredAt) VALUES (?, ?, ?, NOW(6))')
                     ->execute([$d['DispenserID'], $customer, $scanId]);
             }
-            $newCustomer = $event === 'DELIVERY_SCAN' ? $customer : ($event === 'PICKUP_SCAN' || $event === 'RETURN_SCAN' || $event === 'LOAD_SCAN' ? null : $d['CurrentCustomerID']);
+            $newCustomer = $event === 'RETURN_SCAN' ? null : ($customer ?: null);
             $newActor = in_array($event, ['LOAD_SCAN', 'PICKUP_SCAN'], true) ? $actor : null;
             $this->db->prepare('UPDATE dispensers SET LifecycleStatus = ?, CurrentCustomerID = ?, CurrentAccID = ? WHERE DispenserID = ?')
                 ->execute([$steps[$event][1], $newCustomer, $newActor, $d['DispenserID']]);

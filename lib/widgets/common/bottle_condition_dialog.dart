@@ -24,6 +24,14 @@ Future<bool> checkBottleConditionForScan({
   );
   if (!context.mounted) return false;
   if (bottle == null) return true;
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.removeCurrentSnackBar();
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text('${bottle.bottleNumber} · ${bottle.ownerLabel}'),
+      duration: const Duration(seconds: 2),
+    ),
+  );
   if (bottle.isHealthy) {
     if (requireRecoveryRefill && bottle.needsRefillAfterRecovery) {
       throw Exception(
@@ -135,6 +143,7 @@ class _BottleConditionDialogState extends State<BottleConditionDialog> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('Bottle: ${saved.bottleNumber}'),
+                    Text('Owner: ${saved.ownerLabel}'),
                     Text('State: ${saved.condition}'),
                     if (saved.updatedAt != null)
                       Text(
