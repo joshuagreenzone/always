@@ -2,13 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../models/account.dart';
 import '../../models/order_details.dart';
-import '../../theme/app_colors.dart';
-import '../../theme/app_sizes.dart';
-import '../../theme/app_spacing.dart';
-import '../../theme/app_text_styles.dart';
 
-import '../../widgets/common/icon_badge.dart';
-import '../../widgets/common/info_row.dart';
+import '../../theme/app_sizes.dart';
 
 import '../../services/rider_service.dart';
 
@@ -192,320 +187,286 @@ class _DeliveryConfirmationScreenState
     }
   }
 
-  // ============================================================
-  // BUILD
-  // ============================================================
-
   @override
   Widget build(BuildContext context) {
-    final int scannedCount = widget.scannedBottles.length;
-    final int orderedCount = widget.order.totalQuantity;
-    final int undeliveredCount = (orderedCount - scannedCount).clamp(
-      0,
-      orderedCount,
-    );
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Confirm Delivery')),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(AppSizes.screenPadding),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSuccessHeader(),
-
-              const SizedBox(height: AppSpacing.md),
-
-              _buildCustomerCard(),
-
-              const SizedBox(height: AppSpacing.md),
-
-              _buildOrderCard(),
-
-              const SizedBox(height: AppSpacing.md),
-
-              _buildBottlesCard(),
-
-              if (_isPartialDelivery) ...[
-                const SizedBox(height: AppSpacing.md),
-                _buildIncompleteDeliveryReason(undeliveredCount),
-              ],
-
-              const SizedBox(height: AppSpacing.lg),
-
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _isSubmitting ? null : _handleConfirmDelivery,
-                  icon: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.check_circle),
-                  label: Text(
-                    _isSubmitting
-                        ? 'Saving Delivery...'
-                        : _isPartialDelivery
-                        ? 'Confirm Incomplete Delivery'
-                        : 'Confirm Delivery',
-                  ),
+    const blue = Color(0xFF087DA9);
+    final scanned = widget.scannedBottles.length;
+    final ordered = widget.order.totalQuantity;
+    final progress = ordered > 0 ? (scanned / ordered).clamp(0.0, 1.0) : 0.0;
+    return PopScope(
+      canPop: !_isSubmitting,
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF0F7FB),
+        body: Column(
+          children: [
+            Container(
+              clipBehavior: Clip.antiAlias,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF07344C), Color(0xFF168DB8)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
                 ),
               ),
-
-              if (_isPartialDelivery) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Only the scanned bottles will be recorded as delivered. '
-                  'The remaining $undeliveredCount bottle'
-                  '${undeliveredCount == 1 ? '' : 's'} will not be marked '
-                  'as delivered.',
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.bodySecondary,
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // SUCCESS HEADER
-  // ============================================================
-
-  Widget _buildSuccessHeader() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Column(
-          children: [
-            IconBadge(
-              icon: _isPartialDelivery
-                  ? Icons.warning_amber_rounded
-                  : Icons.check_circle,
-              color: _isPartialDelivery ? AppColors.warning : AppColors.success,
-              size: AppSizes.largeIconSize,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              _isPartialDelivery ? 'Partial Delivery' : 'Bottles Scanned',
-              style: AppTextStyles.title,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              '${widget.scannedBottles.length} of '
-              '${widget.order.totalQuantity} bottles scanned.',
-              textAlign: TextAlign.center,
-              style: AppTextStyles.bodySecondary,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // INCOMPLETE DELIVERY REASON
-  // ============================================================
-
-  Widget _buildIncompleteDeliveryReason(int undeliveredCount) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Reason for Incomplete Delivery', style: AppTextStyles.title),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              '$undeliveredCount bottle'
-              '${undeliveredCount == 1 ? '' : 's'} '
-              'could not be delivered. Please explain why.',
-              style: AppTextStyles.bodySecondary,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _incompleteReasonController,
-              minLines: 3,
-              maxLines: 5,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                hintText: 'Enter the reason for the incomplete delivery...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppSizes.cardRadius),
-                ),
-                alignLabelWithHint: true,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // CUSTOMER CARD
-  // ============================================================
-
-  Widget _buildCustomerCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Customer', style: AppTextStyles.title),
-            const SizedBox(height: AppSpacing.md),
-            Row(
-              children: [
-                const IconBadge(
-                  icon: Icons.person_outline,
-                  color: AppColors.info,
-                  size: 36,
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(
-                    widget.order.customerName,
-                    style: AppTextStyles.body,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // ORDER CARD
-  // ============================================================
-
-  Widget _buildOrderCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Order Information', style: AppTextStyles.title),
-            const SizedBox(height: AppSpacing.sm),
-            InfoRow(label: 'Order', value: '#${widget.order.orderId}'),
-            const SizedBox(height: AppSpacing.sm),
-            Text('Order Items', style: AppTextStyles.bodySecondary),
-            const SizedBox(height: AppSpacing.xs),
-            ...widget.order.items.map(_buildOrderItem),
-            const Divider(height: AppSpacing.lg),
-            InfoRow(
-              label: 'Ordered Bottles',
-              value: '${widget.order.totalQuantity}',
-              bold: true,
-            ),
-            InfoRow(
-              label: 'Scanned Bottles',
-              value: '${widget.scannedBottles.length}',
-              bold: true,
-            ),
-            InfoRow(
-              label: 'Order Total',
-              value: '₱${widget.order.totalAmount.toStringAsFixed(2)}',
-              bold: true,
-            ),
-            InfoRow(label: 'Payment', value: widget.order.paymentStatus),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrderItem(OrderItemDetails item) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(AppSizes.cardRadius),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.water_drop_outlined, color: AppColors.accent),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  item.bottleType,
-                  style: AppTextStyles.body.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              Text('× ${item.quantity}', style: AppTextStyles.body),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          InfoRow(
-            label: 'Unit Price',
-            value: '₱${item.unitPrice.toStringAsFixed(2)}',
-          ),
-          InfoRow(
-            label: 'Subtotal',
-            value: '₱${item.totalAmount.toStringAsFixed(2)}',
-            bold: true,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // BOTTLES CARD
-  // ============================================================
-
-  Widget _buildBottlesCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Bottles Scanned', style: AppTextStyles.title),
-            const SizedBox(height: AppSpacing.md),
-            ...widget.scannedBottles.map((bottle) {
-              final String bottleNumber =
-                  bottle['bottleNumber']?.toString() ?? '';
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-                padding: const EdgeInsets.all(AppSpacing.md),
-                decoration: BoxDecoration(
-                  color: AppColors.success.withValues(alpha: 0.06),
-                  border: Border.all(
-                    color: AppColors.success.withValues(alpha: 0.3),
-                  ),
-                  borderRadius: BorderRadius.circular(AppSizes.cardRadius),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.water_drop, color: AppColors.success),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Text(
-                        bottleNumber,
-                        style: AppTextStyles.dashboardTitle,
+              child: Stack(
+                children: [
+                  Positioned(
+                    right: -35,
+                    top: -65,
+                    child: Container(
+                      width: 210,
+                      height: 210,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withValues(alpha: .08),
                       ),
                     ),
-                    const Icon(Icons.check_circle, color: AppColors.success),
+                  ),
+                  SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 14, 20, 26),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            tooltip: 'Back to scanning',
+                            onPressed: _isSubmitting
+                                ? null
+                                : () => Navigator.pop(context),
+                            icon: const Icon(
+                              Icons.arrow_back,
+                              color: Colors.white,
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Order #${widget.order.orderId}',
+                                  style: const TextStyle(
+                                    color: Color(0xFFB8E6F5),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                const Text(
+                                  'Confirm delivery',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 26,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              const Expanded(
+                                child: Text(
+                                  'Delivered',
+                                  style: TextStyle(
+                                    color: Color(0xFF102B40),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              Flexible(
+                                child: Text(
+                                  '$scanned of $ordered bottles',
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(
+                                    color: Color(0xFF102B40),
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: LinearProgressIndicator(
+                              value: progress,
+                              minHeight: 6,
+                              color: blue,
+                              backgroundColor: const Color(0xFFE2F0F7),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_isPartialDelivery) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF5E5),
+                          border: Border.all(color: const Color(0xFFF2CF91)),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: const Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              Icons.warning_amber_rounded,
+                              color: Color(0xFFB76A12),
+                              size: 20,
+                            ),
+                            SizedBox(width: 9),
+                            Expanded(
+                              child: Text(
+                                'Partial delivery needs an explanation',
+                                style: TextStyle(
+                                  color: Color(0xFF96520B),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Reason',
+                        style: TextStyle(
+                          color: Color(0xFF64748B),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _incompleteReasonController,
+                        enabled: !_isSubmitting,
+                        minLines: 3,
+                        maxLines: 5,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: InputDecoration(
+                          hintText: 'Explain why the remaining bottles could not be delivered...',
+                          hintStyle: const TextStyle(
+                            color: Color(0xFF8A9BAC),
+                            fontSize: 13,
+                          ),
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.all(16),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFD7E7F0),
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFD7E7F0),
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                              color: blue,
+                              width: 1.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: blue.withValues(alpha: .2),
+                            blurRadius: 12,
+                            offset: const Offset(0, 5),
+                          ),
+                        ],
+                      ),
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: blue,
+                          minimumSize: const Size.fromHeight(52),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        onPressed: _isSubmitting
+                            ? null
+                            : _handleConfirmDelivery,
+                        child: _isSubmitting
+                            ? const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                  SizedBox(width: 10),
+                                  Text('Saving delivery...'),
+                                ],
+                              )
+                            : const Text(
+                                'Submit delivery',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: blue,
+                        backgroundColor: Colors.white,
+                        side: const BorderSide(color: blue),
+                        minimumSize: const Size.fromHeight(48),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: _isSubmitting
+                          ? null
+                          : () => Navigator.pop(context),
+                      child: const Text(
+                        'Back to scanning',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
                   ],
                 ),
-              );
-            }),
+              ),
+            ),
           ],
         ),
       ),

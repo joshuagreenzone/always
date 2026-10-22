@@ -44,9 +44,16 @@ Future<bool> checkBottleConditionForScan({
     return true;
   }
 
-  final updated = await showDialog<BottleCondition>(
+  final updated = await showModalBottomSheet<BottleCondition>(
     context: context,
-    barrierDismissible: false,
+    isDismissible: false,
+    enableDrag: false,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
     builder: (_) => BottleConditionDialog(
       bottle: bottle,
       accId: accId,
@@ -133,139 +140,233 @@ class _BottleConditionDialogState extends State<BottleConditionDialog> {
     final saved = _saved;
     return PopScope(
       canPop: !_isSaving,
-      child: AlertDialog(
-        title: Text(
-          saved == null
-              ? 'Bottle ${widget.bottle.condition.toLowerCase()}'
-              : 'Bottle State Updated',
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          24,
+          20,
+          MediaQuery.viewInsetsOf(context).bottom +
+              MediaQuery.paddingOf(context).bottom +
+              20,
         ),
-        content: SingleChildScrollView(
-          child: saved != null
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Bottle: ${saved.bottleNumber}'),
-                    Text('Owner: ${saved.ownerLabel}'),
-                    Text('State: ${saved.condition}'),
-                    if (saved.updatedAt != null)
-                      Text(
-                        'Updated: ${_dateLabel(saved.updatedAt!)} (server time)',
-                      ),
-                    Text('Note: ${saved.note ?? _noteController.text.trim()}'),
-                    const SizedBox(height: 12),
-                    Text(
-                      saved.isHealthy
-                          ? saved.needsRefillAfterRecovery
-                                ? 'Refill this bottle again before delivery.'
-                                : 'Continue scanning this bottle.'
-                          : widget.allowDamagedPickup &&
-                                saved.condition == 'DAMAGED'
-                          ? 'This damaged bottle can be ${widget.damagedActionLabel.startsWith('Return') ? 'returned to the station' : 'picked up'}. Refill and delivery remain blocked.'
-                          : 'This bottle will be skipped while it is ${saved.condition.toLowerCase()}.',
-                    ),
-                  ],
-                )
-              : Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Bottle ${widget.bottle.bottleNumber} is marked ${widget.bottle.condition.toLowerCase()}.',
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        widget.allowDamagedPickup &&
-                                widget.bottle.condition == 'DAMAGED'
-                            ? 'You can ${widget.damagedActionLabel.startsWith('Return') ? 'return' : 'pick up'} this bottle while keeping it damaged. Refill and delivery remain blocked.'
-                            : 'Review its condition before continuing. You can update its state or skip this bottle.',
-                      ),
-                      if (widget.bottle.updatedAt != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Last updated: ${_dateLabel(widget.bottle.updatedAt!)} (server time)',
-                        ),
-                      ],
-                      if (widget.bottle.note != null)
-                        Text('Last note: ${widget.bottle.note}'),
-                      const SizedBox(height: 16),
-                      DropdownButtonFormField<String>(
-                        initialValue: _condition,
-                        decoration: const InputDecoration(
-                          labelText: 'New state',
-                        ),
-                        items: BottleCondition.states
-                            .where((state) => state != widget.bottle.condition)
-                            .map(
-                              (state) => DropdownMenuItem(
-                                value: state,
-                                child: Text(state),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: _isSaving
-                            ? null
-                            : (value) => setState(() => _condition = value!),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _noteController,
-                        enabled: !_isSaving,
-                        minLines: 2,
-                        maxLines: 4,
-                        maxLength: 1000,
-                        decoration: const InputDecoration(
-                          labelText: 'Note (required)',
-                          hintText: 'Explain why the bottle state is changing',
-                        ),
-                        validator: (value) =>
-                            value == null || value.trim().isEmpty
-                            ? 'Enter a note before saving.'
-                            : null,
-                      ),
-                      const Text(
-                        'The state, note, staff member, and update date are saved immediately, even if you later discard the scan batch.',
-                      ),
-                      if (_error != null) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          _error!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
+        child: SingleChildScrollView(
+          child: DefaultTextStyle(
+            style: const TextStyle(color: Color(0xFF71869A), fontSize: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  saved == null ? 'Bottle condition' : 'Bottle State Updated',
+                  style: const TextStyle(
+                    color: Color(0xFF075578),
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                saved != null
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('Bottle: ${saved.bottleNumber}'),
+                          Text('Owner: ${saved.ownerLabel}'),
+                          Text('State: ${saved.condition}'),
+                          if (saved.updatedAt != null)
+                            Text(
+                              'Updated: ${_dateLabel(saved.updatedAt!)} (server time)',
+                            ),
+                          Text(
+                            'Note: ${saved.note ?? _noteController.text.trim()}',
                           ),
+                          const SizedBox(height: 12),
+                          Text(
+                            saved.isHealthy
+                                ? saved.needsRefillAfterRecovery
+                                      ? 'Refill this bottle again before delivery.'
+                                      : 'Continue scanning this bottle.'
+                                : widget.allowDamagedPickup &&
+                                      saved.condition == 'DAMAGED'
+                                ? 'This damaged bottle can be ${widget.damagedActionLabel.startsWith('Return') ? 'returned to the station' : 'picked up'}. Refill and delivery remain blocked.'
+                                : 'This bottle will be skipped while it is ${saved.condition.toLowerCase()}.',
+                          ),
+                        ],
+                      )
+                    : Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Bottle ${widget.bottle.bottleNumber} is marked ${widget.bottle.condition.toLowerCase()}.',
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              widget.allowDamagedPickup &&
+                                      widget.bottle.condition == 'DAMAGED'
+                                  ? 'You can ${widget.damagedActionLabel.startsWith('Return') ? 'return' : 'pick up'} this bottle while keeping it damaged. Refill and delivery remain blocked.'
+                                  : 'Choose its condition and add a required note.',
+                            ),
+                            if (widget.bottle.updatedAt != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                'Last updated: ${_dateLabel(widget.bottle.updatedAt!)} (server time)',
+                              ),
+                            ],
+                            if (widget.bottle.note != null)
+                              Text('Last note: ${widget.bottle.note}'),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                for (final state in BottleCondition.states) ...[
+                                  if (state != BottleCondition.states.first)
+                                    const SizedBox(width: 8),
+                                  Expanded(
+                                    child: FilledButton(
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: _condition == state
+                                            ? const Color(0xFF087DA9)
+                                            : Colors.white,
+                                        foregroundColor: _condition == state
+                                            ? Colors.white
+                                            : const Color(0xFF075578),
+                                        minimumSize: const Size.fromHeight(42),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 4,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          side: const BorderSide(
+                                            color: Color(0xFFD7E7F0),
+                                          ),
+                                        ),
+                                      ),
+                                      onPressed:
+                                          _isSaving ||
+                                              state == widget.bottle.condition
+                                          ? null
+                                          : () => setState(
+                                              () => _condition = state,
+                                            ),
+                                      child: Text(
+                                        '${state[0]}${state.substring(1).toLowerCase()}',
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            TextFormField(
+                              controller: _noteController,
+                              enabled: !_isSaving,
+                              minLines: 2,
+                              maxLines: 4,
+                              maxLength: 1000,
+                              decoration: InputDecoration(
+                                labelText: 'Note (required)',
+                                hintText:
+                                    'Explain why the bottle state is changing',
+                                counterText: '',
+                                alignLabelWithHint: true,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFFD7E7F0),
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFFD7E7F0),
+                                  ),
+                                ),
+                              ),
+                              validator: (value) =>
+                                  value == null || value.trim().isEmpty
+                                  ? 'Enter a note before saving.'
+                                  : null,
+                            ),
+                            const Text(
+                              'Changes are saved immediately, even if you cancel the scan batch.',
+                            ),
+                            if (_error != null) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                _error!,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                      ],
-                    ],
+                      ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: saved != null
+                        ? [
+                            FilledButton(
+                              onPressed: () => Navigator.pop(context, saved),
+                              child: const Text('OK'),
+                            ),
+                          ]
+                        : [
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF087DA9),
+                                minimumSize: const Size.fromHeight(48),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              onPressed: _isSaving ? null : _save,
+                              child: Text(
+                                _isSaving ? 'Saving...' : 'Save condition',
+                              ),
+                            ),
+                            if (widget.allowDamagedPickup &&
+                                widget.bottle.condition == 'DAMAGED')
+                              TextButton(
+                                onPressed: _isSaving || _error != null
+                                    ? null
+                                    : () =>
+                                          Navigator.pop(context, widget.bottle),
+                                child: Text(widget.damagedActionLabel),
+                              ),
+                            const SizedBox(height: 8),
+                            OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF087DA9),
+                                minimumSize: const Size.fromHeight(46),
+                                side: const BorderSide(
+                                  color: Color(0xFF73BADD),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              onPressed: _isSaving
+                                  ? null
+                                  : () => Navigator.pop(context),
+                              child: const Text('Cancel'),
+                            ),
+                          ],
                   ),
-                ),
-        ),
-        actions: saved != null
-            ? [
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, saved),
-                  child: const Text('OK'),
-                ),
-              ]
-            : [
-                TextButton(
-                  onPressed: _isSaving ? null : () => Navigator.pop(context),
-                  child: const Text('Skip Bottle'),
-                ),
-                if (widget.allowDamagedPickup &&
-                    widget.bottle.condition == 'DAMAGED')
-                  TextButton(
-                    onPressed: _isSaving || _error != null
-                        ? null
-                        : () => Navigator.pop(context, widget.bottle),
-                    child: Text(widget.damagedActionLabel),
-                  ),
-                FilledButton(
-                  onPressed: _isSaving ? null : _save,
-                  child: Text(_isSaving ? 'Saving...' : 'Save State'),
                 ),
               ],
+            ),
+          ),
+        ),
       ),
     );
   }

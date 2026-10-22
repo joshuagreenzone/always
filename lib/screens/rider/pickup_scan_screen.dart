@@ -73,6 +73,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
   String? _scanMessage;
   bool _scanSuccess = true;
   bool _isProcessing = false;
+  bool _loadingBalance = true;
+  double? _outstandingBalance;
 
   late int _alreadyPickedUpCount;
   final List<_PendingPickupBottle> _scannedBottles = [];
@@ -80,6 +82,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
   @override
   void initState() {
     super.initState();
+    _loadBalance();
     _alreadyPickedUpCount = widget.order.pickedUpBottleCount;
 
     if (_alreadyPickedUpCount < 0) {
@@ -97,6 +100,26 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     _paymentNotesController.dispose();
     _scannerController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadBalance() async {
+    setState(() => _loadingBalance = true);
+    double? balance;
+    try {
+      final order = await _riderService.getOrderDetails(
+        orderId: widget.order.orderId,
+        accId: widget.account.accId,
+      );
+      final amount = order.outstandingAmount;
+      if (amount != null && amount.isFinite && amount >= 0) balance = amount;
+    } catch (_) {
+      // Pickup remains available; confirmation checks the balance again.
+    }
+    if (!mounted) return;
+    setState(() {
+      _outstandingBalance = balance;
+      _loadingBalance = false;
+    });
   }
 
   int get _remainingBottleCount {
@@ -308,7 +331,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
         await _showMessage(
           'Payment Not Collected',
           'The pickup was completed successfully.\n\n'
-              'Outstanding balance: ₱${outstandingAmount.toStringAsFixed(2)}',
+              'Outstanding balance: â‚±${outstandingAmount.toStringAsFixed(2)}',
         );
       }
 
@@ -395,7 +418,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '₱${outstandingAmount.toStringAsFixed(2)}',
+                      'â‚±${outstandingAmount.toStringAsFixed(2)}',
                       style: AppTextStyles.dashboardTitle,
                     ),
                     const SizedBox(height: 16),
@@ -406,7 +429,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                       ),
                       decoration: const InputDecoration(
                         labelText: 'Payment Amount',
-                        prefixText: '₱ ',
+                        prefixText: 'â‚± ',
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -489,7 +512,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(
-                                  'Payment cannot exceed ₱${outstandingAmount.toStringAsFixed(2)}.',
+                                  'Payment cannot exceed â‚±${outstandingAmount.toStringAsFixed(2)}.',
                                 ),
                               ),
                             );
@@ -673,119 +696,273 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    const blue = Color(0xFF087DA9);
     final required = widget.order.deliveredBottleCount;
-    final scanned = _scannedBottles.length;
     final completed = _currentPickedUpCount;
-    final remaining = (required - completed).clamp(0, required);
     final busy = _isProcessing;
-    final canConfirm = scanned > 0 && !busy;
-
+    final balance = _outstandingBalance;
     return PopScope(
       canPop: !busy && _scannedBottles.isEmpty,
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop || busy) return;
-        await _handleBack();
+        if (!didPop && !busy) await _handleBack();
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: Text('Pickup #${widget.order.orderId}'),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: busy ? null : _handleBack,
-          ),
-        ),
-        body: SafeArea(
-          bottom: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                RiderScanCard(
-                  children: [
-                    Text(
-                      'Order #${widget.order.orderId}',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      widget.order.customerName,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    if (widget.order.bottleTypes.isEmpty)
-                      Text('Bottles × $required'),
-                    ...widget.order.bottleTypes.map(
-                      (item) => Text(
-                        '${item.bottleType} × ${item.deliveredBottleCount}',
+        backgroundColor: const Color(0xFFF0F7FB),
+        body: Column(
+          children: [
+            Container(
+              clipBehavior: Clip.antiAlias,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF07344C), Color(0xFF168DB8)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
+                ),
+              ),
+              child: Stack(
+                children: [
+                  Positioned(
+                    right: -35,
+                    top: -65,
+                    child: Container(
+                      width: 210,
+                      height: 210,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withValues(alpha: .08),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Bottles picked up: $completed / $required',
-                      style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 14, 20, 24),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            tooltip: 'Back',
+                            onPressed: busy ? null : _handleBack,
+                            icon: const Icon(
+                              Icons.arrow_back,
+                              color: Colors.white,
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Pickup',
+                                  style: TextStyle(
+                                    color: Color(0xFFB8E6F5),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                const Text(
+                                  'Collect bottles',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 26,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFE0F3FB),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    'Order #${widget.order.orderId}',
+                                    style: const TextStyle(
+                                      color: Color(0xFF075578),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    LinearProgressIndicator(
-                      value: required <= 0
-                          ? 0
-                          : (completed / required).clamp(0.0, 1.0),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      remaining == 0
-                          ? 'All bottles scanned'
-                          : '$remaining remaining · Partial pickup allowed',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                RiderScanCard(
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      'Scan Bottles',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(20),
                       child: SizedBox(
-                        height: 320,
+                        height: 220,
                         child: BottleScannerView(
                           controller: _scannerController,
                           onDetect: _handleScan,
-                          enabled: !busy && remaining > 0,
+                          enabled: !busy && _remainingBottleCount > 0,
                           busy: busy,
                           message: _scanMessage,
                           success: _scanSuccess,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Point the camera at one bottle QR code at a time.',
+                    const SizedBox(height: 14),
+                    RiderScanCard(
+                      children: [
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Collected',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF102B40),
+                                ),
+                              ),
+                            ),
+                            Flexible(
+                              child: Text(
+                                '$completed of $required bottles',
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF102B40),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: LinearProgressIndicator(
+                            value: required <= 0
+                                ? 0
+                                : (completed / required).clamp(0.0, 1.0),
+                            minHeight: 6,
+                            color: blue,
+                            backgroundColor: const Color(0xFFE2F0F7),
+                          ),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 12),
+                    RiderScanCard(
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE3F4FA),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                Icons.payments_outlined,
+                                color: blue,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _loadingBalance
+                                        ? 'Checking balance...'
+                                        : balance == null
+                                        ? 'Balance unavailable'
+                                        : balance > 0
+                                        ? '₱${balance.toStringAsFixed(2)} outstanding'
+                                        : 'No outstanding balance',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF102B40),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    balance == null
+                                        ? 'Balance is checked again after pickup'
+                                        : balance > 0
+                                        ? 'Record full or partial payment after pickup'
+                                        : 'Payment is settled',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF71869A),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (!_loadingBalance && balance == null)
+                              IconButton(
+                                onPressed: busy ? null : _loadBalance,
+                                tooltip: 'Retry balance',
+                                icon: const Icon(Icons.refresh, color: blue),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    if (_scannedBottles.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      ExpansionTile(
+                        title: Text(
+                          'Scanned bottles (${_scannedBottles.length})',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        children: _scannedBottles
+                            .map(
+                              (b) => ListTile(
+                                dense: true,
+                                leading: const Icon(
+                                  Icons.water_drop_outlined,
+                                  color: blue,
+                                ),
+                                title: Text(b.bottleNumber),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ],
                   ],
                 ),
-                const SizedBox(height: 12),
-                PendingBottleList(
-                  title: 'Bottles to Pick Up',
-                  bottles: _scannedBottles.map((b) => b.bottleNumber).toList(),
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
         bottomNavigationBar: SafeArea(
-          minimum: const EdgeInsets.all(16),
-          child: FilledButton.icon(
-            onPressed: canConfirm ? _completePickup : null,
-            icon: const Icon(Icons.check_circle_outline),
-            label: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                busy ? 'Please wait...' : 'Confirm Pickup ($scanned)',
+          minimum: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+          child: FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: blue,
+              minimumSize: const Size.fromHeight(52),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
               ),
+            ),
+            onPressed: _scannedBottles.isNotEmpty && !busy
+                ? _completePickup
+                : null,
+            child: Text(
+              busy ? 'Please wait...' : 'Confirm pickup',
+              style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
         ),

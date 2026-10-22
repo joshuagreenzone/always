@@ -182,7 +182,9 @@ void main() {
         await tester.pumpAndSettle();
         await _enterBottle(tester);
         await tester.tap(
-          find.text(returning ? 'Confirm Return (1)' : 'Confirm Loading (1)'),
+          find.text(
+            returning ? 'Review and save return' : 'Review and save loading',
+          ),
         );
         await tester.pumpAndSettle();
         expect(service.saves, 0);
@@ -216,9 +218,9 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Awaiting station return: 2'), findsOneWidget);
+      expect(find.text('Awaiting return (2)'), findsOneWidget);
       expect(find.text('COLLECTED-1'), findsNothing);
-      await tester.tap(find.text('View Return Inventory'));
+      await tester.tap(find.text('Awaiting return (2)'));
       await tester.pumpAndSettle();
       expect(find.text('4 bottles returned'), findsOneWidget);
       expect(find.text('LOADED-1'), findsNothing);
@@ -239,10 +241,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Loaded for delivery: 1'), findsOneWidget);
+      expect(find.text('In vehicle (1)'), findsOneWidget);
       expect(find.text('LOADED-1'), findsNothing);
       expect(find.textContaining('/200'), findsNothing);
-      await tester.tap(find.text('View Loaded Bottles'));
+      await tester.tap(find.text('In vehicle (1)'));
       await tester.pumpAndSettle();
       expect(find.text('LOADED-1'), findsOneWidget);
       expect(find.text('COLLECTED-1'), findsNothing);
@@ -267,7 +269,7 @@ void main() {
       service.fail = true;
       await tester.tap(find.byIcon(Icons.refresh));
       await tester.pumpAndSettle();
-      expect(find.text('Awaiting station return: 2'), findsOneWidget);
+      expect(find.text('Awaiting return (2)'), findsOneWidget);
       expect(
         find.textContaining('Could not refresh the bottle counts.'),
         findsOneWidget,
@@ -282,11 +284,13 @@ void main() {
       await _openReturn(tester, service);
       await _enterBottle(tester);
       expect(
-        find.text('Bottle COLLECTED-2 added. Tap Confirm Return to save it.'),
+        find.text(
+          'Bottle COLLECTED-2 added. Tap Review and save return to save it.',
+        ),
         findsOneWidget,
       );
       expect(service.saves, 0);
-      await tester.tap(find.text('Confirm Return (1)'));
+      await tester.tap(find.text('Review and save return'));
       await tester.pumpAndSettle();
       expect(find.text('Confirm Station Return?'), findsOneWidget);
       await tester.tap(find.text('Confirm'));
@@ -308,7 +312,11 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('No bottles scanned yet.'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Your scanned bottles will appear here.'),
+      150,
+    );
+    expect(find.text('Your scanned bottles will appear here.'), findsOneWidget);
     expect(find.textContaining('/200'), findsNothing);
     expect(service.saves, 0);
   });
@@ -323,15 +331,15 @@ void main() {
       transitionService: _TransitionService(jump: true),
     );
     await _enterBottle(tester);
-    expect(find.text('Explain scan jump'), findsOneWidget);
-    expect(find.text('Continue Scan'), findsOneWidget);
+    expect(find.text('A step was skipped'), findsOneWidget);
+    expect(find.text('Continue'), findsOneWidget);
     await tester.enterText(find.byType(TextField).last, 'Found at station');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue Scan'));
+    await tester.tap(find.text('Continue'));
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
-    expect(find.text('Confirm Return (1)'), findsOneWidget);
-    await tester.tap(find.text('Confirm Return (1)'));
+    expect(find.text('Review and save return'), findsOneWidget);
+    await tester.tap(find.text('Review and save return'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
@@ -347,16 +355,16 @@ void main() {
     final service = _InventoryService()..failSave = true;
     await _openReturn(tester, service);
     await _enterBottle(tester);
-    await tester.tap(find.text('Confirm Return (1)'));
+    await tester.tap(find.text('Review and save return'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Your scanned list is kept.'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('COLLECTED-2'), 200);
     expect(find.text('COLLECTED-2'), findsOneWidget);
-    expect(find.text('Bottles to Return'), findsOneWidget);
-    expect(find.text('Awaiting station return: 2'), findsOneWidget);
+    expect(find.text('Ready to return'), findsOneWidget);
     service.failSave = false;
-    await tester.tap(find.text('Confirm Return (1)'));
+    await tester.tap(find.text('Review and save return'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
@@ -388,10 +396,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    await tester.ensureVisible(find.text('View Return Inventory'));
-    await tester.tap(find.text('View Return Inventory'));
+    await tester.ensureVisible(find.text('Awaiting return (2)'));
+    await tester.tap(find.text('Awaiting return (2)'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Recent Station Returns'));
+    await tester.scrollUntilVisible(find.text('Recent Station Returns'), 150);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });

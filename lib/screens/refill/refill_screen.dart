@@ -12,8 +12,8 @@ import '../../models/bottle.dart';
 import '../../services/refill_service.dart';
 import '../../widgets/common/bottle_condition_dialog.dart';
 import '../../theme/app_colors.dart';
-import '../../theme/app_sizes.dart';
-import '../../theme/app_spacing.dart';
+import '../../widgets/common/rider_scan_card.dart';
+import 'refilled_bottles_screen.dart';
 
 class RefillScreen extends StatefulWidget {
   final Account account;
@@ -336,299 +336,398 @@ class _RefillScreenState extends State<RefillScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F9),
-      appBar: AppBar(
-        title: const Text(
-          'Refill Bottles',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        centerTitle: true,
-        elevation: 0,
-      ),
-      body: _isSaving ? _buildSavingScreen() : _buildContent(),
-    );
-  }
-
-  Widget _buildSavingScreen() {
-    return const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircularProgressIndicator(color: Color(0xFF0284C7)),
-          SizedBox(height: 16),
-          Text(
-            'Saving refill batch...',
-            style: TextStyle(fontWeight: FontWeight.w600),
-          ),
-          SizedBox(height: 6),
-          Text(
-            'Please do not close the app.',
-            style: TextStyle(color: Color(0xFF64748B)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildContent() {
-    return SafeArea(
-      child: Column(
-        children: [
-          if (_isScanning) _buildScanner(),
-
-          if (_errorMessage != null && !_isScanning)
+    const blue = Color(0xFF087DA9);
+    final busy = _isSaving || _isVerifying;
+    return PopScope(
+      canPop: !busy,
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF0F7FB),
+        body: Column(
+          children: [
             Container(
-              width: double.infinity,
-              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.error.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.error.withOpacity(0.25)),
+              clipBehavior: Clip.antiAlias,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF07344C), Color(0xFF168DB8)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
+                ),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Stack(
                 children: [
-                  const Icon(Icons.error_outline, color: AppColors.error),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _errorMessage!,
-                      style: const TextStyle(color: AppColors.error),
+                  Positioned(
+                    right: -35,
+                    top: -65,
+                    child: Container(
+                      width: 210,
+                      height: 210,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withValues(alpha: .08),
+                      ),
                     ),
                   ),
-                  IconButton(
-                    onPressed: () {
-                      setState(() {
-                        _errorMessage = null;
-                      });
-                    },
-                    icon: const Icon(Icons.close, size: 18),
+                  SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 12, 12, 24),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            tooltip: 'Back',
+                            onPressed: busy
+                                ? null
+                                : () => Navigator.pop(context),
+                            icon: const Icon(
+                              Icons.arrow_back,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'STATION WORKER',
+                                  style: TextStyle(
+                                    color: Color(0xFFB8E6F5),
+                                    fontSize: 11,
+                                    letterSpacing: 1.8,
+                                  ),
+                                ),
+                                SizedBox(height: 5),
+                                Text(
+                                  'Refill bottles',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 26,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Clear batch',
+                            onPressed: busy || _batch.isEmpty
+                                ? null
+                                : _clearBatch,
+                            icon: const Icon(
+                              Icons.delete_sweep_outlined,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
-
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0284C7).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.water_drop_rounded,
-                    color: Color(0xFF0284C7),
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  Row(
                     children: [
-                      const Text(
-                        'Current Refill Batch',
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E293B),
+                      Expanded(
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: blue,
+                            minimumSize: const Size.fromHeight(46),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: busy ? null : () {},
+                          child: const Text('Refill bottles'),
                         ),
                       ),
-                      Text(
-                        '${_batch.length} bottle(s) verified',
-                        style: const TextStyle(color: Color(0xFF64748B)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: const Color(0xFF07344C),
+                            minimumSize: const Size.fromHeight(46),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: busy
+                              ? null
+                              : () {
+                                  _stopScanning();
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          const RefilledBottlesScreen(),
+                                    ),
+                                  );
+                                },
+                          child: const Text('Ready for loading'),
+                        ),
                       ),
                     ],
                   ),
-                ),
-                if (!_isScanning)
-                  ElevatedButton.icon(
-                    onPressed: _isVerifying ? null : _startScanning,
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('Scan'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0284C7),
-                      foregroundColor: Colors.white,
+                  const SizedBox(height: 16),
+                  Container(
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(22),
+                      gradient: const RadialGradient(
+                        colors: [Color(0xFF125574), Color(0xFF07344C)],
+                        radius: .9,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF07344C).withValues(alpha: .15),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
                     ),
-                  ),
-              ],
-            ),
-          ),
-
-          Expanded(
-            child: _batch.isEmpty
-                ? SingleChildScrollView(
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.qr_code_scanner_rounded,
-                              size: 58,
-                              color: Colors.blueGrey.shade200,
+                    child: _isScanning
+                        ? SizedBox(
+                            height: 260,
+                            child: BottleScannerView(
+                              controller: _scannerController,
+                              busy: busy,
+                              enabled: _isScanning && !_isSaving,
+                              message:
+                                  _errorMessage ??
+                                  (_lastScannedNumber == null || _isVerifying
+                                      ? null
+                                      : 'Scanned\n$_lastScannedNumber'),
+                              success: _errorMessage == null,
+                              onDetect: (capture) async {
+                                if (capture.barcodes.isEmpty) return;
+                                final value = capture.barcodes.first.rawValue;
+                                if (value != null) await _handleQrCode(value);
+                              },
                             ),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'No bottles scanned yet',
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF475569),
+                          )
+                        : InkWell(
+                            onTap: busy ? null : _startScanning,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 28),
+                              child: Column(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(18),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: const Color(0xFF6CDCF5),
+                                        width: 2,
+                                      ),
+                                      borderRadius: BorderRadius.circular(18),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFF55D5F3)
+                                              .withValues(alpha: .15),
+                                          blurRadius: 24,
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(
+                                      Icons.qr_code_scanner,
+                                      color: Color(0xFF99EAFF),
+                                      size: 42,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 18),
+                                  const Text(
+                                    'Start Scanning',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  const Text(
+                                    'Scan each bottle after refilling',
+                                    style: TextStyle(
+                                      color: Color(0xFFB8D6E5),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              'Start scanning to add bottles to your '
-                              'temporary refill batch.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Color(0xFF64748B)),
+                          ),
+                  ),
+                  if (_isScanning)
+                    Center(
+                      child: TextButton.icon(
+                        onPressed: busy ? null : _stopScanning,
+                        icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                        label: const Text('Stop Camera'),
+                      ),
+                    ),
+                  if (_errorMessage != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.error.withValues(alpha: .1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.error_outline,
+                              color: AppColors.error,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _errorMessage!,
+                                style: const TextStyle(color: AppColors.error),
+                              ),
                             ),
                           ],
                         ),
                       ),
                     ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _batch.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
-                    itemBuilder: (context, index) {
-                      final bottle = _batch[index];
-
-                      return Card(
-                        margin: EdgeInsets.zero,
-                        color: Colors.white,
-                        child: ListTile(
-                          leading: const CircleAvatar(
-                            backgroundColor: Color(0xFFDCFCE7),
-                            child: Icon(
-                              Icons.check_rounded,
-                              color: Color(0xFF16A34A),
+                  const SizedBox(height: 14),
+                  RiderScanCard(
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'This batch',
+                              style: TextStyle(fontWeight: FontWeight.w700),
                             ),
                           ),
-                          title: Text(
-                            bottle.bottleNumber,
+                          Text(
+                            '${_batch.length} ${_batch.length == 1 ? 'bottle' : 'bottles'}',
                             style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1E293B),
+                              color: blue,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                          subtitle: Text(
-                            '${bottle.bottleType}\n'
-                            '₱${bottle.price.toStringAsFixed(2)}',
-                          ),
-                          isThreeLine: true,
-                          trailing: IconButton(
-                            tooltip: 'Remove from batch',
-                            onPressed: _isVerifying || _isSaving
-                                ? null
-                                : () => _removeBottle(bottle),
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              color: AppColors.error,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-
-          Padding(
-            padding: const EdgeInsets.all(AppSizes.screenPadding),
-            child: SizedBox(
-              width: double.infinity,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_isScanning)
-                    OutlinedButton.icon(
-                      onPressed: _isVerifying ? null : _stopScanning,
-                      icon: const Icon(Icons.stop_circle_outlined),
-                      label: Text(
-                        _isVerifying ? 'VERIFYING BOTTLE...' : 'STOP SCANNING',
+                        ],
                       ),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 46),
-                      ),
-                    ),
-
-                  if (!_isScanning && _batch.isNotEmpty)
-                    TextButton.icon(
-                      onPressed: _isVerifying ? null : _clearBatch,
-                      icon: const Icon(Icons.delete_sweep_outlined),
-                      label: const Text('Clear Batch'),
-                    ),
-
-                  const SizedBox(height: AppSpacing.sm),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed:
-                          _batch.isEmpty ||
-                              _isScanning ||
-                              _isVerifying ||
-                              _isSaving
-                          ? null
-                          : _finishScanning,
-                      icon: const Icon(Icons.done_all_rounded),
-                      label: Text(
-                        'DONE SCANNING REFILL (${_batch.length})',
-                        textAlign: TextAlign.center,
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(0, 52),
-                        backgroundColor: const Color(0xFF0284C7),
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor: Colors.grey.shade300,
-                      ),
-                    ),
-                  ),
-
-                  if (_isScanning)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
-                      child: Text(
-                        'Bottles are not saved until you finish '
-                        'the batch.',
-                        textAlign: TextAlign.center,
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Verified bottles are saved when you confirm the batch.',
                         style: TextStyle(
-                          fontSize: 12,
                           color: Color(0xFF64748B),
+                          fontSize: 12,
                         ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (_batch.isEmpty)
+                    const RiderScanCard(
+                      children: [
+                        Text(
+                          'Your scanned bottles will appear here.',
+                          style: TextStyle(color: Color(0xFF64748B)),
+                        ),
+                      ],
                     ),
+                  ..._batch.map(
+                    (bottle) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: RiderScanCard(
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE3F4FA),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(
+                                  Icons.water_drop_outlined,
+                                  color: blue,
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      bottle.bottleNumber,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '${bottle.bottleType} · ₱${bottle.price.toStringAsFixed(2)}',
+                                      style: const TextStyle(
+                                        color: Color(0xFF64748B),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              TextButton(
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFFA76012),
+                                  backgroundColor: const Color(0xFFFFF1DB),
+                                ),
+                                onPressed: busy
+                                    ? null
+                                    : () => _removeBottle(bottle),
+                                child: const Text('Remove'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
+          ],
+        ),
+        bottomNavigationBar: SafeArea(
+          minimum: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: blue,
+              minimumSize: const Size.fromHeight(52),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            onPressed: busy || _batch.isEmpty ? null : _finishScanning,
+            icon: _isSaving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.water_drop_outlined, size: 20),
+            label: Text(
+              _isSaving
+                  ? 'Saving refill batch...'
+                  : _isVerifying
+                  ? 'Verifying bottle...'
+                  : 'Review and save refill',
+            ),
           ),
-        ],
+        ),
       ),
     );
   }
-
-  Widget _buildScanner() => SizedBox(
-    height: (MediaQuery.sizeOf(context).height * .38).clamp(180.0, 320.0),
-    child: BottleScannerView(
-      controller: _scannerController,
-      busy: _isVerifying,
-      enabled: _isScanning && !_isSaving,
-      message:
-          _errorMessage ??
-          (_lastScannedNumber == null || _isVerifying
-              ? null
-              : 'Scanned\n$_lastScannedNumber'),
-      success: _errorMessage == null,
-      onDetect: (capture) => _handleQrCode(capture.barcodes.first.rawValue!),
-    ),
-  );
 }

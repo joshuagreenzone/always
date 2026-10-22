@@ -238,8 +238,10 @@ class RiderHomeScreen extends StatelessWidget {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            TransactionHistoryScreen(accId: account.accId),
+                        builder: (_) => TransactionHistoryScreen(
+                          accId: account.accId,
+                          account: account,
+                        ),
                       ),
                     );
                   },

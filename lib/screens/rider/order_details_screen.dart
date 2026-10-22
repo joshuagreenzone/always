@@ -5,12 +5,7 @@ import '../../models/assigned_order.dart';
 import '../../models/order_details.dart';
 import '../../services/rider_service.dart';
 import '../../theme/app_colors.dart';
-import '../../theme/app_sizes.dart';
-import '../../theme/app_spacing.dart';
-import '../../theme/app_text_styles.dart';
 
-import '../../widgets/common/icon_badge.dart';
-import '../../widgets/common/info_row.dart';
 import '../../widgets/common/status_chip.dart';
 
 import 'delivery_scan_screen.dart';
@@ -72,340 +67,276 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final status = _orderDetails?.deliveryStatus ?? widget.order.deliveryStatus;
     return Scaffold(
-      appBar: AppBar(title: Text('Order #${widget.order.orderId}')),
-      body: _buildBody(),
-    );
-  }
-
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_errorMessage != null) {
-      return _buildError();
-    }
-
-    final order = _orderDetails;
-
-    if (order == null) {
-      return const Center(child: Text('Order details unavailable.'));
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadOrderDetails,
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(AppSizes.screenPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildOrderHeader(order),
-
-            const SizedBox(height: AppSpacing.md),
-
-            _buildCustomerCard(order),
-
-            const SizedBox(height: AppSpacing.md),
-
-            _buildOrderInformation(order),
-
-            const SizedBox(height: AppSpacing.md),
-
-            _buildDeliverySection(order),
-
-            const SizedBox(height: AppSpacing.lg),
-
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => DeliveryScanScreen(
-                        account: widget.account,
-                        order: order,
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.local_shipping),
-                label: const Text('Start Delivery'),
+      backgroundColor: const Color(0xFFF0F7FB),
+      body: Column(
+        children: [
+          Container(
+            clipBehavior: Clip.antiAlias,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF07344C), Color(0xFF168DB8)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrderHeader(OrderDetails order) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Row(
-          children: [
-            const IconBadge(
-              icon: Icons.receipt_long,
-              color: AppColors.primary,
-              size: 52,
-            ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Order #${order.orderId}', style: AppTextStyles.title),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    order.deliveryStatus,
-                    style: AppTextStyles.bodySecondary,
-                  ),
-                ],
-              ),
-            ),
-            StatusChip(
-              label: order.paymentStatus,
-              color: paymentStatusColor(order.paymentStatus),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCustomerCard(OrderDetails order) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Customer', style: AppTextStyles.title),
-            const SizedBox(height: AppSpacing.md),
-            Row(
+            child: Stack(
               children: [
-                const IconBadge(
-                  icon: Icons.person_outline,
-                  color: AppColors.info,
-                  size: 36,
+                Positioned(
+                  right: -35,
+                  top: -65,
+                  child: Container(
+                    width: 210,
+                    height: 210,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withValues(alpha: .08),
+                    ),
+                  ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(order.customerName, style: AppTextStyles.body),
+                SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 12, 20, 24),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        IconButton(
+                          tooltip: 'Back',
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(
+                            Icons.arrow_back,
+                            color: Colors.white,
+                          ),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 6),
+                              Text(
+                                'Order #${widget.order.orderId}',
+                                style: const TextStyle(
+                                  color: Color(0xFFB8E6F5),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                              const Text(
+                                'Delivery details',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE0F3FB),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  _statusLabel(status),
+                                  style: const TextStyle(
+                                    color: Color(0xFF075578),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrderInformation(OrderDetails order) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Order Information', style: AppTextStyles.title),
-            const SizedBox(height: AppSpacing.md),
-
-            if (order.items.isEmpty)
-              Text('No order items found.', style: AppTextStyles.bodySecondary)
-            else
-              ...order.items.map((item) => _buildOrderItem(item)),
-
-            const Divider(height: AppSpacing.lg),
-
-            InfoRow(
-              label: 'Total Bottles',
-              value: '${order.totalQuantity}',
-              bold: true,
-            ),
-
-            InfoRow(
-              label: 'Total Amount',
-              value: '₱${order.totalAmount.toStringAsFixed(2)}',
-              bold: true,
-            ),
-
-            InfoRow(label: 'Payment', value: order.paymentStatus),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrderItem(OrderItemDetails item) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppSizes.cardRadius),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.water_drop_outlined, color: AppColors.accent),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  item.bottleType,
-                  style: AppTextStyles.body.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              Text('× ${item.quantity}', style: AppTextStyles.body),
-            ],
           ),
-
-          const SizedBox(height: AppSpacing.xs),
-
-          InfoRow(
-            label: 'Unit Price',
-            value: '₱${item.unitPrice.toStringAsFixed(2)}',
-          ),
-
-          InfoRow(
-            label: 'Subtotal',
-            value: '₱${item.totalAmount.toStringAsFixed(2)}',
-            bold: true,
-          ),
+          Expanded(child: _buildBody()),
         ],
       ),
     );
   }
 
-  Widget _buildDeliverySection(OrderDetails order) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  String _statusLabel(String value) => value
+      .replaceAll('_', ' ')
+      .toLowerCase()
+      .split(' ')
+      .map(
+        (word) => word.isEmpty
+            ? word
+            : '${word[0].toUpperCase()}${word.substring(1)}',
+      )
+      .join(' ');
+
+  Widget _buildBody() {
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+    final order = _orderDetails;
+    if (_errorMessage != null || order == null) {
+      return RefreshIndicator(
+        onRefresh: _loadOrderDetails,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(24),
           children: [
-            Row(
-              children: [
-                const IconBadge(
-                  icon: Icons.water_drop_outlined,
-                  color: AppColors.accent,
-                  size: 36,
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text('Delivery Bottles', style: AppTextStyles.title),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: AppSpacing.md),
-
+            const SizedBox(height: 60),
+            const Icon(Icons.error_outline, color: AppColors.error, size: 40),
+            const SizedBox(height: 16),
             Text(
-              '${order.totalQuantity} bottle'
-              '${order.totalQuantity == 1 ? '' : 's'} required',
-              style: AppTextStyles.body,
+              _errorMessage ?? 'Order details unavailable.',
+              textAlign: TextAlign.center,
             ),
-
-            const SizedBox(height: AppSpacing.sm),
-
-            ...order.items.map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                child: Text(
-                  '${item.quantity} × ${item.bottleType}',
-                  style: AppTextStyles.bodySecondary,
-                ),
-              ),
-            ),
-
-            const SizedBox(height: AppSpacing.xs),
-
-            Text(
-              'Bottle numbers will be recorded when the rider scans the bottles during delivery.',
-              style: AppTextStyles.bodySecondary,
-            ),
-
-            const SizedBox(height: AppSpacing.md),
-
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(AppSizes.cardRadius),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.qr_code_scanner,
-                    color: AppColors.textSecondary,
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: Text(
-                      'No bottles scanned yet.',
-                      style: AppTextStyles.bodySecondary,
-                    ),
-                  ),
-                ],
+            const SizedBox(height: 16),
+            Center(
+              child: FilledButton(
+                onPressed: _loadOrderDetails,
+                child: const Text('Try Again'),
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildError() {
+      );
+    }
     return RefreshIndicator(
       onRefresh: _loadOrderDetails,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(AppSizes.screenPadding),
+        padding: const EdgeInsets.all(20),
         children: [
-          const SizedBox(height: 100),
-
-          Center(
-            child: IconBadge(
-              icon: Icons.error_outline,
-              color: AppColors.error,
-              size: AppSizes.largeIconSize,
+          _card([
+            _detail('Customer', order.customerName),
+            _detail(
+              'Address',
+              order.customerAddress.isEmpty
+                  ? 'Not provided'
+                  : order.customerAddress,
             ),
-          ),
-
-          const SizedBox(height: AppSpacing.md),
-
-          Center(
-            child: Text('Unable to load order', style: AppTextStyles.title),
-          ),
-
-          const SizedBox(height: AppSpacing.sm),
-
-          Center(
-            child: Text(
-              _errorMessage ?? 'Something went wrong.',
-              textAlign: TextAlign.center,
-              style: AppTextStyles.bodySecondary,
+            _detail(
+              'Contact',
+              order.customerContact.isEmpty
+                  ? 'Not provided'
+                  : order.customerContact,
             ),
-          ),
-
-          const SizedBox(height: AppSpacing.lg),
-
-          Center(
-            child: ElevatedButton(
-              onPressed: _loadOrderDetails,
-              child: const Text('Try Again'),
+          ]),
+          const SizedBox(height: 14),
+          _card([
+            if (order.items.isEmpty)
+              _detail('Quantity', '${order.totalQuantity} bottles')
+            else
+              ...order.items.asMap().entries.map(
+                (entry) => _detail(
+                  entry.key == 0 ? 'Quantity' : '',
+                  '${entry.value.quantity} × ${entry.value.bottleType}',
+                ),
+              ),
+            _detail('Total', '₱${order.totalAmount.toStringAsFixed(2)}'),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Payment',
+                      style: TextStyle(color: Color(0xFF71869A), fontSize: 12),
+                    ),
+                  ),
+                  Flexible(
+                    child: StatusChip(
+                      label: _statusLabel(order.paymentStatus),
+                      color: order.paymentStatus.toUpperCase() == 'UNPAID'
+                          ? const Color(0xFFB76A12)
+                          : paymentStatusColor(order.paymentStatus),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF087DA9).withValues(alpha: .2),
+                  blurRadius: 12,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF087DA9),
+                minimumSize: const Size.fromHeight(52),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      DeliveryScanScreen(account: widget.account, order: order),
+                ),
+              ),
+              child: const Text(
+                'Start scanning bottles',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _card(List<Widget> children) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    ),
+  );
+
+  Widget _detail(String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 7),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 2,
+          child: Text(
+            label,
+            style: const TextStyle(color: Color(0xFF71869A), fontSize: 12),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          flex: 3,
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            style: const TextStyle(
+              color: Color(0xFF102B40),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }

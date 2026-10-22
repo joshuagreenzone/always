@@ -162,7 +162,7 @@ void main() {
       pickup: true,
     );
     expect(find.text('Pick Up Damaged Bottle'), findsNothing);
-    await tester.tap(find.text('Skip Bottle'));
+    await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(result, false);
   });
@@ -181,7 +181,7 @@ void main() {
         delivery: true,
       );
       await tester.enterText(find.byType(TextFormField), 'Found in storage');
-      await tester.tap(find.text('Save State'));
+      await tester.tap(find.text('Save condition'));
       await tester.pumpAndSettle();
       expect(
         find.text('Refill this bottle again before delivery.'),
@@ -216,12 +216,12 @@ void main() {
         BottleCondition(bottleNumber: 'RG-0001', condition: state),
       );
       await _openScannerCheck(tester, service, (_) {});
-      expect(find.text('Bottle ${state.toLowerCase()}'), findsOneWidget);
-      await tester.tap(find.text('Save State'));
+      expect(find.text('Bottle condition'), findsOneWidget);
+      await tester.tap(find.text('Save condition'));
       await tester.pumpAndSettle();
       expect(find.text('Enter a note before saving.'), findsOneWidget);
       await tester.enterText(find.byType(TextFormField), '   ');
-      await tester.tap(find.text('Save State'));
+      await tester.tap(find.text('Save condition'));
       await tester.pumpAndSettle();
       expect(service.updates, 0);
     });
@@ -235,7 +235,7 @@ void main() {
     );
     bool? result;
     await _openScannerCheck(tester, service, (value) => result = value);
-    await tester.tap(find.text('Skip Bottle'));
+    await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(result, false);
     expect(service.updates, 0);
@@ -250,7 +250,7 @@ void main() {
     bool? result;
     await _openScannerCheck(tester, service, (value) => result = value);
     await tester.enterText(find.byType(TextFormField), ' Found in storage ');
-    await tester.tap(find.text('Save State'));
+    await tester.tap(find.text('Save condition'));
     await tester.pumpAndSettle();
     expect(service.lastNote, 'Found in storage');
     expect(service.lastCondition, 'HEALTHY');
@@ -269,12 +269,10 @@ void main() {
       );
       bool? result;
       await _openScannerCheck(tester, service, (value) => result = value);
-      await tester.tap(find.byType(DropdownButtonFormField<String>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('DAMAGED').last);
+      await tester.tap(find.text('Damaged'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField), 'Found with a crack');
-      await tester.tap(find.text('Save State'));
+      await tester.tap(find.text('Save condition'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('OK'));
       await tester.pumpAndSettle();
@@ -295,14 +293,14 @@ void main() {
         find.byType(TextFormField),
         'Repaired and checked',
       );
-      await tester.tap(find.text('Save State'));
+      await tester.tap(find.text('Save condition'));
       await tester.pumpAndSettle();
       expect(
         find.text('The bottle state changed. Scan it again.'),
         findsOneWidget,
       );
       expect(result, isNull);
-      expect(find.text('Skip Bottle'), findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
     },
   );
 
@@ -314,7 +312,7 @@ void main() {
     )..pending = Completer<BottleCondition>();
     await _openScannerCheck(tester, service, (_) {});
     await tester.enterText(find.byType(TextFormField), 'Recovered');
-    await tester.tap(find.text('Save State'));
+    await tester.tap(find.text('Save condition'));
     await tester.pump();
     await tester.tap(find.text('Saving...'));
     expect(service.updates, 1);

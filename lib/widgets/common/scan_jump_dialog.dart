@@ -25,46 +25,99 @@ Future<Map<String, dynamic>?> checkScanJump({
   if (transition['isCycleJump'] != true) return transition;
 
   var reasonText = '';
-  final reason = await showDialog<String>(
+  final reason = await showModalBottomSheet<String>(
     context: context,
-    barrierDismissible: false,
+    isDismissible: false,
+    enableDrag: false,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
     builder: (dialogContext) => StatefulBuilder(
-      builder: (dialogContext, setDialogState) => AlertDialog(
-        title: const Text('Explain scan jump'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Bottle $bottleNumber was last scanned at '
-              '${_scanLabel(transition['previousEventType'])}. '
-              'Expected: ${_scanLabel(transition['expectedPreviousEventType'])}.',
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              autofocus: true,
-              maxLength: 1000,
-              maxLines: 3,
-              onChanged: (value) => setDialogState(() => reasonText = value),
-              decoration: const InputDecoration(
-                labelText: 'Why is this step being skipped?',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
+      builder: (dialogContext, setDialogState) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          24,
+          20,
+          MediaQuery.viewInsetsOf(dialogContext).bottom +
+              MediaQuery.paddingOf(dialogContext).bottom +
+              20,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'A step was skipped',
+                style: TextStyle(
+                  color: Color(0xFF075578),
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Bottle $bottleNumber was not scanned at ${_scanLabel(transition['expectedPreviousEventType'])}. Tell us why you are continuing.',
+                style: const TextStyle(color: Color(0xFF71869A), fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Reason (required)',
+                style: TextStyle(color: Color(0xFF71869A), fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                maxLength: 1000,
+                maxLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                onChanged: (value) => setDialogState(() => reasonText = value),
+                decoration: InputDecoration(
+                  hintText: 'Explain the missed scan',
+                  counterText: '',
+                  contentPadding: const EdgeInsets.all(14),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFFD7E7F0)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFFD7E7F0)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF087DA9),
+                  minimumSize: const Size.fromHeight(48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: reasonText.trim().isEmpty
+                    ? null
+                    : () => Navigator.pop(dialogContext, reasonText.trim()),
+                child: const Text('Continue'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF087DA9),
+                  minimumSize: const Size.fromHeight(46),
+                  side: const BorderSide(color: Color(0xFF73BADD)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel scan'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: reasonText.trim().isEmpty
-                ? null
-                : () => Navigator.pop(dialogContext, reasonText.trim()),
-            child: const Text('Continue Scan'),
-          ),
-        ],
+        ),
       ),
     ),
   );

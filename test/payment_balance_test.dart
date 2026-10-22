@@ -59,8 +59,8 @@ void main() {
     tester,
   ) async {
     await open(tester, BalanceService());
-    expect(find.text('Original Order Total'), findsOneWidget);
-    expect(find.text('Remaining Balance'), findsOneWidget);
+    expect(find.text('Collect payment'), findsOneWidget);
+    expect(find.text('Amount due'), findsOneWidget);
     expect(find.text('\u20b115.00'), findsOneWidget);
     final amount = tester.widget<TextField>(find.byType(TextField).first);
     expect(amount.controller!.text, '15.00');
@@ -94,17 +94,36 @@ void main() {
     await open(tester, BalanceService()..balance = 0);
     expect(find.text('\u20b10.00'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('Record Payment'),
+      find.text('Save payment'),
       250,
       scrollable: find.byType(Scrollable).first,
     );
     expect(
       tester
           .widget<ElevatedButton>(
-            find.widgetWithText(ElevatedButton, 'Record Payment'),
+            find.widgetWithText(ElevatedButton, 'Save payment'),
           )
           .onPressed,
       isNull,
     );
+  });
+
+  testWidgets('electronic methods show receipt requirement and retain amount', (
+    tester,
+  ) async {
+    await open(tester, BalanceService());
+    expect(find.text('Required for this payment method'), findsNothing);
+    for (final method in ['GCash', 'Bank']) {
+      await tester.tap(find.text(method));
+      await tester.pumpAndSettle();
+      expect(find.text('Required for this payment method'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).first).controller!.text,
+        '15.00',
+      );
+    }
+    await tester.tap(find.text('Cash'));
+    await tester.pumpAndSettle();
+    expect(find.text('Required for this payment method'), findsNothing);
   });
 }

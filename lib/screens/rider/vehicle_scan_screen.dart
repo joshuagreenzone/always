@@ -43,6 +43,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
   List<Map<String, dynamic>> _inventory = [];
   List<Map<String, dynamic>> _returns = [];
   bool _busy = false;
+  bool _viewVehicle = false;
   bool _camera = false;
   bool _loadingInventory = true;
   String? _error;
@@ -51,8 +52,6 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
   String? _lastCameraNumber;
   DateTime? _lastCameraScan;
   String get _action => widget.returning ? 'RETURN' : 'LOAD';
-  String get _title =>
-      widget.returning ? 'Return to Station' : 'Load for Delivery';
   List<Map<String, dynamic>> get _current => _inventory
       .where((b) => b['status'] == (widget.returning ? 'COLLECTED' : 'LOADED'))
       .toList();
@@ -229,7 +228,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
             transition;
         _error = null;
         _success =
-            'Bottle ${bottle['bottleNumber']} added. Tap ${widget.returning ? 'Confirm Return' : 'Confirm Loading'} to save it.';
+            'Bottle ${bottle['bottleNumber']} added. Tap ${widget.returning ? 'Review and save return' : 'Review and save loading'} to save it.';
       });
     } catch (e) {
       if (!mounted) return;
@@ -343,282 +342,440 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
         : DateFormat('MMM d, yyyy • h:mm a').format(date);
   }
 
-  Future<void> _showInventory() async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      await showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        showDragHandle: true,
-        builder: (context) => FractionallySizedBox(
-          heightFactor: .8,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        widget.returning
-                            ? 'Station Return Inventory'
-                            : 'Loaded Bottles',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Close inventory',
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (_inventoryError != null)
-                        _feedback(_inventoryError!, error: true),
-                      _panel([
-                        Text(
-                          widget.returning
-                              ? 'Bottles awaiting return'
-                              : 'Bottles already loaded',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        if (_current.isEmpty &&
-                            !_loadingInventory &&
-                            _inventoryError == null)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            child: Text(
-                              widget.returning
-                                  ? 'No picked-up bottles are waiting to be returned.'
-                                  : 'No bottles are loaded yet.',
-                            ),
-                          ),
-                        ..._current.map(
-                          (b) => ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: Icon(
-                              widget.returning
-                                  ? Icons.local_shipping_outlined
-                                  : Icons.inventory_2_outlined,
-                            ),
-                            title: Text(b['bottleNumber'].toString()),
-                            subtitle: Text(
-                              b['condition'] == 'DAMAGED'
-                                  ? 'Damaged - can return to station'
-                                  : b['condition'] == 'MISSING'
-                                  ? 'Missing - review condition before returning'
-                                  : 'Healthy',
-                            ),
-                          ),
-                        ),
-                      ]),
-                      if (widget.returning) ...[
-                        const SizedBox(height: 12),
-                        _panel([
-                          Text(
-                            'Recent Station Returns',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          if (_returns.isEmpty &&
-                              !_loadingInventory &&
-                              _inventoryError == null)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Text(
-                                'Confirmed arrival counts will appear here.',
-                              ),
-                            ),
-                          ..._returns.map(
-                            (r) => ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: const Icon(
-                                Icons.warehouse_outlined,
-                                color: AppColors.success,
-                              ),
-                              title: Text(
-                                '${_bottles((r['count'] as num).toInt())} returned',
-                              ),
-                              subtitle: Text(_dateLabel(r['scannedAt'])),
-                            ),
-                          ),
-                        ]),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !_busy && _pending.isEmpty,
     onPopInvokedWithResult: (didPop, result) {
       if (!didPop) _leave();
     },
-    child: Scaffold(
-      appBar: AppBar(
-        title: Text(_title),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: _busy ? null : _leave,
-        ),
-        actions: [
-          IconButton(
-            onPressed: _busy ? null : _refresh,
-            icon: const Icon(Icons.refresh),
+    child: _loadingScreen(),
+  );
+
+  Widget _loadingScreen() => Scaffold(
+    backgroundColor: const Color(0xFFF0F7FB),
+    body: Column(
+      children: [
+        Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF07344C), Color(0xFF168DB8)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
           ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          if (!_busy) await _refresh();
-        },
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _panel([
-                Text(
-                  widget.returning
-                      ? 'Check bottles back into the station'
-                      : 'Prepare bottles for your delivery',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.returning
-                      ? '1. Pick up bottles from the customer.\n2. Scan each bottle as you unload at the station.\n3. Confirm the return to record the arrival count.'
-                      : '1. Refill bottles at the station.\n2. Scan each bottle as you load your vehicle.\n3. Confirm loading before delivery.',
-                ),
-                const SizedBox(height: 12),
-                if (_loadingInventory) const LinearProgressIndicator(),
-                Text(
-                  widget.returning
-                      ? 'Awaiting station return: ${_current.length}'
-                      : 'Loaded for delivery: ${_current.length}',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _busy || _loadingInventory ? null : _showInventory,
-                  icon: const Icon(Icons.inventory_2_outlined),
-                  label: Text(
-                    widget.returning
-                        ? 'View Return Inventory'
-                        : 'View Loaded Bottles',
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 12, 12, 24),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: _busy ? null : _leave,
+                    tooltip: 'Back',
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
                   ),
-                ),
-                if (widget.returning)
-                  const Text(
-                    'Damaged bottles can be returned. Their condition stays damaged.',
-                  ),
-              ]),
-              if (_inventoryError != null)
-                _feedback(_inventoryError!, error: true),
-              const SizedBox(height: 12),
-              _panel([
-                Text(
-                  'Scan Bottles',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                if (_camera) ...[
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: SizedBox(
-                      height: 320,
-                      child: BottleScannerView(
-                        controller: _scanner,
-                        onDetect: _scan,
-                        busy: _busy,
-                        enabled: _camera && !_busy,
-                        message: _error ?? _success,
-                        success: _error == null,
-                      ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'RIDER',
+                          style: TextStyle(
+                            color: Color(0xFFB8E6F5),
+                            fontSize: 11,
+                            letterSpacing: 1.8,
+                          ),
+                        ),
+                        SizedBox(height: 5),
+                        Text(
+                          widget.returning
+                              ? 'Return to station'
+                              : 'Load vehicle',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const Text(
-                    'Point the camera at one bottle QR code at a time.',
+                  IconButton(
+                    onPressed: _busy ? null : _refresh,
+                    tooltip: 'Refresh inventory',
+                    icon: const Icon(Icons.refresh, color: Colors.white),
                   ),
                 ],
-                if (!_camera || !widget.returning)
-                  OutlinedButton.icon(
-                    onPressed: _busy ? null : _toggleCamera,
-                    icon: Icon(
-                      _camera
-                          ? Icons.stop_circle_outlined
-                          : Icons.qr_code_scanner,
-                    ),
-                    label: Text(_camera ? 'Stop Camera' : 'Start Scanning'),
-                  ),
-                TextButton.icon(
-                  onPressed: _busy ? null : _enterNumber,
-                  icon: const Icon(Icons.keyboard_outlined),
-                  label: const Text('Enter Bottle Number'),
-                ),
-                if (_error != null) _feedback(_error!, error: true),
-                if (_success != null) _feedback(_success!),
-              ]),
-              const SizedBox(height: 12),
-              PendingBottleList(
-                title: widget.returning
-                    ? 'Bottles to Return'
-                    : 'Bottles to Load',
-                bottles: _pending,
-                onRemove: _busy
-                    ? null
-                    : (number) => setState(() {
-                        _pending.remove(number);
-                        _jumpDetails.remove(number.toLowerCase());
-                        _success =
-                            'Bottle $number removed from the scanned list.';
-                        _error = null;
-                      }),
               ),
-              const SizedBox(height: 12),
-            ],
-          ),
-        ),
-      ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.all(16),
-        child: FilledButton.icon(
-          onPressed: _busy || _pending.isEmpty ? null : _save,
-          icon: Icon(
-            widget.returning
-                ? Icons.warehouse_outlined
-                : Icons.local_shipping_outlined,
-          ),
-          label: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              _busy
-                  ? 'Please wait...'
-                  : '${widget.returning ? 'Confirm Return' : 'Confirm Loading'} (${_pending.length})',
             ),
           ),
         ),
-      ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () async {
+              if (!_busy) await _refresh();
+            },
+            child: ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: _loadTab(
+                        widget.returning ? 'Return bottles' : 'Load bottles',
+                        false,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _loadTab(
+                        widget.returning
+                            ? 'Awaiting return (${_current.length})'
+                            : 'In vehicle (${_current.length})',
+                        true,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                if (_loadingInventory) const LinearProgressIndicator(),
+                if (_inventoryError != null)
+                  _feedback(_inventoryError!, error: true),
+                if (_viewVehicle) ...[
+                  if (_current.isEmpty &&
+                      !_loadingInventory &&
+                      _inventoryError == null)
+                    _panel([
+                      Text(
+                        widget.returning
+                            ? 'No bottles are awaiting return.'
+                            : 'No bottles loaded yet.',
+                      ),
+                    ]),
+                  ..._current.map(
+                    (b) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _panel([
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(
+                            Icons.water_drop_outlined,
+                            color: Color(0xFF087DA9),
+                          ),
+                          title: Text(b['bottleNumber'].toString()),
+                          subtitle: Text(
+                            b['condition'] == 'DAMAGED' && widget.returning
+                                ? 'Damaged - can return to station'
+                                : b['condition']?.toString() ?? 'Loaded',
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ),
+                  if (widget.returning) ...[
+                    const SizedBox(height: 12),
+                    _panel([
+                      Text(
+                        'Recent Station Returns',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      if (_returns.isEmpty &&
+                          !_loadingInventory &&
+                          _inventoryError == null)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'Confirmed arrival counts will appear here.',
+                          ),
+                        ),
+                      ..._returns.map(
+                        (r) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(
+                            Icons.warehouse_outlined,
+                            color: AppColors.success,
+                          ),
+                          title: Text(
+                            '${_bottles((r['count'] as num).toInt())} returned',
+                          ),
+                          subtitle: Text(_dateLabel(r['scannedAt'])),
+                        ),
+                      ),
+                    ]),
+                  ],
+                ] else ...[
+                  Container(
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(22),
+                      gradient: const RadialGradient(
+                        colors: [Color(0xFF125574), Color(0xFF07344C)],
+                        radius: .9,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF07344C).withValues(alpha: .15),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: _camera
+                        ? SizedBox(
+                            height: 260,
+                            child: BottleScannerView(
+                              controller: _scanner,
+                              onDetect: _scan,
+                              busy: _busy,
+                              enabled: _camera && !_busy,
+                              message: _error ?? _success,
+                              success: _error == null,
+                            ),
+                          )
+                        : InkWell(
+                            onTap: _busy ? null : _toggleCamera,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 28),
+                              child: Column(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(18),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: const Color(0xFF6CDCF5),
+                                        width: 2,
+                                      ),
+                                      borderRadius: BorderRadius.circular(18),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFF55D5F3)
+                                              .withValues(alpha: .15),
+                                          blurRadius: 24,
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(
+                                      Icons.qr_code_scanner,
+                                      color: Color(0xFF99EAFF),
+                                      size: 42,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 18),
+                                  const Text(
+                                    'Start Scanning',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    widget.returning
+                                        ? 'Scan each bottle as you unload it'
+                                        : 'Scan each bottle as you load it',
+                                    style: TextStyle(
+                                      color: Color(0xFFB8D6E5),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (_camera)
+                        TextButton(
+                          onPressed: _busy ? null : _toggleCamera,
+                          child: const Text('Stop Camera'),
+                        ),
+                      Flexible(
+                        child: TextButton.icon(
+                          onPressed: _busy ? null : _enterNumber,
+                          icon: const Icon(Icons.keyboard_outlined, size: 18),
+                          label: const Text('Enter Bottle Number'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_error != null) _feedback(_error!, error: true),
+                  if (_success != null) _feedback(_success!),
+                  if (widget.returning)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        'Damaged bottles can be returned. Their condition stays damaged.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  _panel([
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'This batch',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        Text(
+                          _bottles(_pending.length),
+                          style: const TextStyle(
+                            color: Color(0xFF087DA9),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: LinearProgressIndicator(
+                        value: _pending.length / 200,
+                        minHeight: 6,
+                        color: const Color(0xFF087DA9),
+                        backgroundColor: const Color(0xFFE2F0F7),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Up to 200 bottles per batch',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  if (_pending.isEmpty)
+                    _panel([
+                      const Text(
+                        'Your scanned bottles will appear here.',
+                        style: TextStyle(color: Color(0xFF64748B)),
+                      ),
+                    ]),
+                  ..._pending.map(
+                    (number) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _panel([
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE3F4FA),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                Icons.water_drop_outlined,
+                                color: Color(0xFF087DA9),
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    number,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    widget.returning
+                                        ? 'Ready to return'
+                                        : 'Ready to load',
+                                    style: TextStyle(
+                                      color: Color(0xFF64748B),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                foregroundColor: const Color(0xFFA76012),
+                                backgroundColor: const Color(0xFFFFF1DB),
+                              ),
+                              onPressed: _busy
+                                  ? null
+                                  : () => setState(() {
+                                      _pending.remove(number);
+                                      _jumpDetails.remove(number.toLowerCase());
+                                      _success = null;
+                                      _error = null;
+                                    }),
+                              child: const Text('Remove'),
+                            ),
+                          ],
+                        ),
+                      ]),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
     ),
+    bottomNavigationBar: _viewVehicle
+        ? null
+        : SafeArea(
+            minimum: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF087DA9),
+                minimumSize: const Size.fromHeight(52),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: _busy || _pending.isEmpty ? null : _save,
+              icon: Icon(
+                widget.returning
+                    ? Icons.warehouse_outlined
+                    : Icons.local_shipping_outlined,
+                size: 20,
+              ),
+              label: Text(
+                _busy
+                    ? 'Please wait...'
+                    : widget.returning
+                    ? 'Review and save return'
+                    : 'Review and save loading',
+              ),
+            ),
+          ),
   );
+
+  Widget _loadTab(String label, bool inventory) {
+    final selected = _viewVehicle == inventory;
+    return FilledButton(
+      style: FilledButton.styleFrom(
+        backgroundColor: selected ? const Color(0xFF087DA9) : Colors.white,
+        foregroundColor: selected ? Colors.white : const Color(0xFF07344C),
+        minimumSize: const Size.fromHeight(46),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      onPressed: _busy
+          ? null
+          : () async {
+              if (inventory && _camera) await _toggleCamera();
+              if (mounted) setState(() => _viewVehicle = inventory);
+            },
+      child: Text(label),
+    );
+  }
 
   Widget _panel(List<Widget> children) => RiderScanCard(children: children);
 

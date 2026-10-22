@@ -6,6 +6,7 @@ import 'package:syawla/models/pickup_order.dart';
 import 'package:syawla/screens/rider/delivery_scan_screen.dart';
 import 'package:syawla/screens/rider/pickup_scan_screen.dart';
 import 'package:syawla/widgets/common/rider_scan_card.dart';
+import 'package:syawla/widgets/common/bottle_scanner_view.dart';
 
 final account = Account(
   accId: 3,
@@ -95,16 +96,16 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.byType(RiderScanCard), findsNWidgets(3));
+        expect(find.byType(RiderScanCard), findsNWidgets(pickup ? 2 : 3));
         expect(find.text('Order #42'), findsOneWidget);
-        if (pickup) expect(find.text('Slim × 1'), findsOneWidget);
+        if (pickup) expect(find.text('0 of 3 bottles'), findsOneWidget);
         final confirm = find.widgetWithText(
           FilledButton,
-          pickup ? 'Confirm Pickup (0)' : 'Confirm Delivery (0)',
+          pickup ? 'Confirm pickup' : 'Confirm Delivery (0)',
         );
         expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
         expect(confirm.hitTestable(), findsOneWidget);
-        await tester.ensureVisible(find.text('Scan Bottles'));
+        await tester.ensureVisible(find.byType(BottleScannerView));
         await tester.pumpAndSettle();
         expect(confirm.hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);

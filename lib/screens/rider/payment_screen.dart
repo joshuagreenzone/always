@@ -7,7 +7,7 @@ import '../../models/account.dart';
 import '../../models/order_details.dart';
 import '../../services/rider_service.dart';
 import '../../theme/app_colors.dart';
-import '../../theme/app_sizes.dart';
+
 import '../../theme/app_spacing.dart';
 import '../../theme/app_text_styles.dart';
 
@@ -257,11 +257,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ],
             const SizedBox(height: AppSpacing.md),
             Text(
-              'Paid: ₱${paidAmount.toStringAsFixed(2)}',
+              'Paid: â‚±${paidAmount.toStringAsFixed(2)}',
               style: AppTextStyles.body,
             ),
             Text(
-              'Outstanding: ₱${outstanding.toStringAsFixed(2)}',
+              'Outstanding: â‚±${outstanding.toStringAsFixed(2)}',
               style: AppTextStyles.body,
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -315,240 +315,262 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // This is the original order total for display only.
-    // The API must calculate the payable total using confirmed
-    // delivered bottles, especially for incomplete deliveries.
-    final total = widget.order.totalAmount;
-
+    const blue = Color(0xFF087DA9);
+    final canPay =
+        !_isProcessing &&
+        !_finished &&
+        !_loadingBalance &&
+        _balanceError == null &&
+        (_remainingBalance ?? 0) > 0;
     return PopScope(
       canPop: !_isProcessing,
       child: Scaffold(
-        appBar: AppBar(title: const Text('Receive Payment'), centerTitle: true),
-        body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSizes.screenPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildOrderSummary(total),
-                const SizedBox(height: AppSpacing.md),
-                _buildReceiverCard(),
-                const SizedBox(height: AppSpacing.md),
-                _buildPaymentForm(),
-                const SizedBox(height: AppSpacing.lg),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed:
-                        _isProcessing ||
-                            _finished ||
-                            _loadingBalance ||
-                            _balanceError != null ||
-                            (_remainingBalance ?? 0) <= 0
-                        ? null
-                        : _submitPayment,
-                    icon: _isProcessing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.payments_outlined),
-                    label: Text(
-                      _isProcessing ? 'Recording Payment...' : 'Record Payment',
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: _isProcessing || _finished ? null : _skipPayment,
-                    child: const Text('No Payment Received'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrderSummary(double total) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        backgroundColor: const Color(0xFFF0F7FB),
+        body: Column(
           children: [
-            const Text('Order Payment', style: AppTextStyles.sectionTitle),
-            const SizedBox(height: AppSpacing.md),
-            Text('Order #${widget.order.orderId}', style: AppTextStyles.body),
-            const SizedBox(height: AppSpacing.xs),
-            Text(widget.order.customerName, style: AppTextStyles.bodySecondary),
-            const SizedBox(height: AppSpacing.md),
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Original Order Total',
-                    style: AppTextStyles.body,
-                  ),
-                ),
-                Text(
-                  '₱${total.toStringAsFixed(2)}',
-                  style: AppTextStyles.dashboardTitle,
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.sm),
             Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(AppSizes.radiusMd),
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.primary,
-                  width: 2,
+              clipBehavior: Clip.antiAlias,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF07344C), Color(0xFF168DB8)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Stack(
                 children: [
-                  const Text(
-                    'Remaining Balance',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  if (_loadingBalance)
-                    const LinearProgressIndicator()
-                  else if (_balanceError != null) ...[
-                    Text(_balanceError!),
-                    TextButton(
-                      onPressed: _loadBalance,
-                      child: const Text('Retry'),
-                    ),
-                  ] else
-                    Text(
-                      '\u20b1${_remainingBalance!.toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  Positioned(
+                    right: -35,
+                    top: -65,
+                    child: Container(
+                      width: 210,
+                      height: 210,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withValues(alpha: .08),
                       ),
                     ),
+                  ),
+                  SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Order #${widget.order.orderId}',
+                              style: const TextStyle(
+                                color: Color(0xFFB8E6F5),
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            const Text(
+                              'Collect payment',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 26,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            const Text(
+                              'Amount due',
+                              style: TextStyle(
+                                color: Color(0xFFB8E6F5),
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            if (_loadingBalance)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 8),
+                                child: SizedBox(
+                                  width: 120,
+                                  child: LinearProgressIndicator(
+                                    color: Colors.white,
+                                    backgroundColor: Color(0xFF438EAC),
+                                  ),
+                                ),
+                              )
+                            else
+                              Text(
+                                _balanceError != null
+                                    ? 'Unavailable'
+                                    : '₱${_remainingBalance!.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              '${widget.scannedBottles.length} bottle(s) '
-              'were submitted for delivery.',
-              style: AppTextStyles.bodySecondary,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            const Text(
-              'The server validates the payable amount against '
-              'confirmed delivered bottles.',
-              style: AppTextStyles.bodySecondary,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildReceiverCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Row(
-          children: [
-            const Icon(Icons.account_circle_outlined, size: 40),
-            const SizedBox(width: AppSpacing.md),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Payment Received By',
-                    style: AppTextStyles.bodySecondary,
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    widget.account.accName,
-                    style: AppTextStyles.dashboardTitle,
-                  ),
-                  Text(
-                    widget.account.accType,
-                    style: AppTextStyles.bodySecondary,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPaymentForm() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSizes.dashboardCardPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Payment Details', style: AppTextStyles.sectionTitle),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _amountController,
-              enabled:
-                  !_isProcessing && !_loadingBalance && _balanceError == null,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: const InputDecoration(
-                labelText: 'Payment Amount',
-                prefixText: '₱ ',
-                hintText: 'Enter amount',
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            DropdownButtonFormField<String>(
-              value: _paymentType,
-              decoration: const InputDecoration(labelText: 'Payment Method'),
-              items: const [
-                DropdownMenuItem(value: 'CASH', child: Text('Cash')),
-                DropdownMenuItem(value: 'GCASH', child: Text('GCash')),
-                DropdownMenuItem(
-                  value: 'BANK_TRANSFER',
-                  child: Text('Bank Transfer'),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (_balanceError != null) ...[
+                      Text(
+                        _balanceError!,
+                        style: const TextStyle(color: AppColors.error),
+                      ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: _isProcessing ? null : _loadBalance,
+                          child: const Text('Retry'),
+                        ),
+                      ),
+                    ],
+                    _label('Payment method'),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(child: _method('Cash', 'CASH')),
+                        const SizedBox(width: 8),
+                        Expanded(child: _method('GCash', 'GCASH')),
+                        const SizedBox(width: 8),
+                        Expanded(child: _method('Bank', 'BANK_TRANSFER')),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    _label('Amount received (₱)'),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _amountController,
+                      enabled:
+                          !_isProcessing &&
+                          !_loadingBalance &&
+                          _balanceError == null,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: _input('Enter amount'),
+                    ),
+                    const SizedBox(height: 16),
+                    _label('Note (optional)'),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _notesController,
+                      enabled: !_isProcessing,
+                      minLines: 1,
+                      maxLines: 3,
+                      decoration: _input('Add a note'),
+                    ),
+                    const SizedBox(height: 14),
+                    if (_receiptImage != null) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Image.file(
+                          _receiptImage!,
+                          height: 160,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    CustomPaint(
+                      painter: _ReceiptBorderPainter(),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: _isProcessing ? null : _takeReceiptPhoto,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 22,
+                              horizontal: 12,
+                            ),
+                            child: Column(
+                              children: [
+                                const Icon(
+                                  Icons.camera_alt_outlined,
+                                  color: blue,
+                                  size: 24,
+                                ),
+                                const SizedBox(height: 7),
+                                Text(
+                                  _receiptImage == null
+                                      ? 'Add receipt photo'
+                                      : 'Retake receipt photo',
+                                  style: const TextStyle(
+                                    color: blue,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                if (_paymentType != 'CASH') ...[
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    'Required for this payment method',
+                                    style: TextStyle(
+                                      color: Color(0xFF71869A),
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: blue,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(52),
+                        elevation: 3,
+                        shadowColor: blue.withValues(alpha: .3),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: canPay ? _submitPayment : null,
+                      child: Text(
+                        _isProcessing ? 'Saving payment...' : 'Save payment',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: blue,
+                        backgroundColor: Colors.white,
+                        side: const BorderSide(color: blue),
+                        minimumSize: const Size.fromHeight(48),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: _isProcessing || _finished
+                          ? null
+                          : _skipPayment,
+                      child: const Text(
+                        'Continue without payment',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-              onChanged: _isProcessing
-                  ? null
-                  : (value) {
-                      if (value == null) return;
-
-                      setState(() {
-                        _paymentType = value;
-                        _receiptImage = null;
-                      });
-                    },
-            ),
-            if (_paymentType != 'CASH') ...[
-              const SizedBox(height: AppSpacing.md),
-              _buildReceiptSection(),
-            ],
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _notesController,
-              enabled: !_isProcessing,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Notes (Optional)'),
+              ),
             ),
           ],
         ),
@@ -556,41 +578,79 @@ class _PaymentScreenState extends State<PaymentScreen> {
     );
   }
 
-  Widget _buildReceiptSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Payment Receipt', style: AppTextStyles.sectionTitle),
-        const SizedBox(height: AppSpacing.xs),
-        const Text(
-          'Take a picture of the payment receipt or transaction confirmation.',
-          style: AppTextStyles.bodySecondary,
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (_receiptImage != null)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppSizes.cardRadius),
-            child: Image.file(
-              _receiptImage!,
-              width: double.infinity,
-              height: 220,
-              fit: BoxFit.cover,
-            ),
+  Widget _label(String text) => Text(
+    text,
+    style: const TextStyle(
+      color: Color(0xFF506C80),
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+    ),
+  );
+
+  InputDecoration _input(String hint) => InputDecoration(
+    hintText: hint,
+    filled: true,
+    fillColor: Colors.white,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: const BorderSide(color: Color(0xFFD7E7F0)),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: const BorderSide(color: Color(0xFFD7E7F0)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: const BorderSide(color: Color(0xFF087DA9), width: 1.5),
+    ),
+  );
+
+  Widget _method(String label, String value) {
+    final selected = _paymentType == value;
+    return FilledButton(
+      style: FilledButton.styleFrom(
+        backgroundColor: selected ? const Color(0xFF087DA9) : Colors.white,
+        foregroundColor: selected ? Colors.white : const Color(0xFF102B40),
+        minimumSize: const Size.fromHeight(44),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: selected ? Colors.transparent : const Color(0xFFD7E7F0),
           ),
-        if (_receiptImage != null) const SizedBox(height: AppSpacing.sm),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _isProcessing ? null : _takeReceiptPhoto,
-            icon: const Icon(Icons.camera_alt_outlined),
-            label: Text(
-              _receiptImage == null
-                  ? 'Take Receipt Photo'
-                  : 'Retake Receipt Photo',
-            ),
-          ),
         ),
-      ],
+      ),
+      onPressed: _isProcessing || _finished
+          ? null
+          : () => setState(() {
+              _paymentType = value;
+            }),
+      child: Text(label),
     );
   }
+}
+
+class _ReceiptBorderPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      const Radius.circular(16),
+    );
+    canvas.drawRRect(rect, Paint()..color = Colors.white);
+    final path = Path()..addRRect(rect);
+    final paint = Paint()
+      ..color = const Color(0xFF73BADD)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    for (final metric in path.computeMetrics()) {
+      for (double distance = 0; distance < metric.length; distance += 9) {
+        canvas.drawPath(metric.extractPath(distance, distance + 5), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReceiptBorderPainter oldDelegate) => false;
 }

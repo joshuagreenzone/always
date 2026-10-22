@@ -40,6 +40,8 @@ try {
             o.OrderID,
             o.CustomerID,
             c.CustomerName,
+            c.CustomerAddress,
+            c.CustomerContactNum AS CustomerContact,
 
             o.OrderDateTime,
             o.OrderStatus,

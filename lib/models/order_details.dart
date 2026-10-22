@@ -36,6 +36,8 @@ class OrderDetails {
   final int orderId;
   final int customerId;
   final String customerName;
+  final String customerAddress;
+  final String customerContact;
 
   final List<OrderItemDetails> items;
 
@@ -55,6 +57,8 @@ class OrderDetails {
     required this.orderId,
     required this.customerId,
     required this.customerName,
+    this.customerAddress = '',
+    this.customerContact = '',
     required this.items,
     required this.totalQuantity,
     required this.totalAmount,
@@ -90,6 +94,10 @@ class OrderDetails {
       orderId: int.parse(json['OrderID'].toString()),
       customerId: int.parse(json['CustomerID'].toString()),
       customerName: json['CustomerName'].toString(),
+      customerAddress: json['CustomerAddress']?.toString() ?? '',
+      customerContact:
+          (json['CustomerContact'] ?? json['CustomerContactNum'])?.toString() ??
+          '',
 
       items: items,
 
