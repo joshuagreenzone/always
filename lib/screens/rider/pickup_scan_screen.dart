@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/batch_scan_location.dart';
 import '../../services/scan_lookup_service.dart';
+import '../../widgets/common/unregistered_qr_dialog.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 import '../../widgets/common/rider_scan_card.dart';
 import '../../widgets/common/scan_jump_dialog.dart';
@@ -27,6 +28,7 @@ class _PendingPickupBottle {
   final double accuracy;
   final String? jumpReason;
   final int? previousScanEventId;
+  final int? bottleTypeId;
 
   _PendingPickupBottle({
     required this.bottleNumber,
@@ -35,19 +37,22 @@ class _PendingPickupBottle {
     required this.accuracy,
     this.jumpReason,
     this.previousScanEventId,
+    this.bottleTypeId,
   });
 }
 
 class PickupScanScreen extends StatefulWidget {
   final Account account;
-  final PickupOrder order;
+  final PickupOrder? order;
+  final RiderService? riderService;
   final ScanLookupService? lookupService;
   final BatchScanLocation? batchLocation;
 
   const PickupScanScreen({
     super.key,
     required this.account,
-    required this.order,
+    this.order,
+    this.riderService,
     this.lookupService,
     this.batchLocation,
   });
@@ -58,8 +63,15 @@ class PickupScanScreen extends StatefulWidget {
 
 class _PickupScanScreenState extends State<PickupScanScreen> {
   final MobileScannerController _scannerController =
-      createBottleScannerController();
-  final RiderService _riderService = RiderService();
+      createBottleScannerController(autoStart: false);
+  late final RiderService _riderService = widget.riderService ?? RiderService();
+  PickupOrder? _order;
+  bool _viewAssigned = false;
+  bool _loadingAssigned = false;
+  bool _assignedLoaded = false;
+  String? _assignedError;
+  List<PickupOrder> _assignedOrders = [];
+  bool _camera = false;
   final ImagePicker _imagePicker = ImagePicker();
 
   final TextEditingController _paymentAmountController =
@@ -82,15 +94,17 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
   @override
   void initState() {
     super.initState();
-    _loadBalance();
-    _alreadyPickedUpCount = widget.order.pickedUpBottleCount;
+    _order = widget.order;
+    if (_order != null) _loadBalance();
+    _alreadyPickedUpCount = _order?.pickedUpBottleCount ?? 0;
 
     if (_alreadyPickedUpCount < 0) {
       _alreadyPickedUpCount = 0;
     }
 
-    if (_alreadyPickedUpCount > widget.order.deliveredBottleCount) {
-      _alreadyPickedUpCount = widget.order.deliveredBottleCount;
+    if (_order != null &&
+        _alreadyPickedUpCount > _order!.deliveredBottleCount) {
+      _alreadyPickedUpCount = _order!.deliveredBottleCount;
     }
   }
 
@@ -102,12 +116,341 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     super.dispose();
   }
 
+  Future<void> _loadAssignedOrders() async {
+    if (_loadingAssigned) return;
+    setState(() {
+      _loadingAssigned = true;
+      _assignedError = null;
+    });
+    try {
+      final orders = await _riderService.getPickupOrders(widget.account.accId);
+      if (!mounted) return;
+      setState(() {
+        _assignedOrders = orders;
+        _assignedLoaded = true;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => _assignedError = e.toString().replaceFirst('Exception: ', ''),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingAssigned = false);
+    }
+  }
+
+  Widget _pickupTab(String label, bool assigned) {
+    final selected = _viewAssigned == assigned;
+    return FilledButton(
+      style: FilledButton.styleFrom(
+        backgroundColor: selected ? const Color(0xFF087DA9) : Colors.white,
+        foregroundColor: selected ? Colors.white : const Color(0xFF07344C),
+        minimumSize: const Size.fromHeight(46),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      onPressed: _isProcessing
+          ? null
+          : () async {
+              if (assigned && _camera) await _toggleCamera();
+              if (!mounted) return;
+              setState(() => _viewAssigned = assigned);
+              if (assigned && !_assignedLoaded) await _loadAssignedOrders();
+            },
+      child: Text(label, textAlign: TextAlign.center),
+    );
+  }
+
+  Widget _assignedDeliveries() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      if (_loadingAssigned) const LinearProgressIndicator(),
+      if (_assignedError != null)
+        RiderScanCard(
+          children: [
+            Text(_assignedError!, style: const TextStyle(color: Colors.red)),
+            TextButton(
+              onPressed: _loadAssignedOrders,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      if (_assignedLoaded &&
+          _assignedOrders.isEmpty &&
+          !_loadingAssigned &&
+          _assignedError == null)
+        const RiderScanCard(
+          children: [Text('No assigned deliveries awaiting pickup.')],
+        ),
+      ..._assignedOrders.map(
+        (delivery) => Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: RiderScanCard(
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(
+                  Icons.assignment_return_outlined,
+                  color: Color(0xFF087DA9),
+                ),
+                title: Text(
+                  'Order #${delivery.orderId}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(delivery.customerName),
+              ),
+              Text(
+                'Delivery #${delivery.deliveryId} · ${delivery.remainingBottleCount} left',
+              ),
+              const SizedBox(height: 8),
+              ...delivery.bottleTypes.map(
+                (type) => Text(
+                  '${type.bottleType}: ${type.remainingBottleCount} to collect',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${delivery.pickedUpBottleCount} of ${delivery.deliveredBottleCount} bottles collected',
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  value: delivery.deliveredBottleCount <= 0
+                      ? 0
+                      : (delivery.pickedUpBottleCount /
+                                delivery.deliveredBottleCount)
+                            .clamp(0.0, 1.0),
+                  minHeight: 6,
+                  color: const Color(0xFF087DA9),
+                  backgroundColor: const Color(0xFFE2F0F7),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed:
+                    _isProcessing ||
+                        (_scannedBottles.isNotEmpty &&
+                            _order?.deliveryId != delivery.deliveryId)
+                    ? null
+                    : () {
+                        setState(() {
+                          if (_order?.deliveryId != delivery.deliveryId) {
+                            _order = delivery;
+                            _alreadyPickedUpCount =
+                                delivery.pickedUpBottleCount;
+                            _outstandingBalance = null;
+                          }
+                          _viewAssigned = false;
+                        });
+                        _loadBalance();
+                      },
+                icon: const Icon(Icons.qr_code_scanner),
+                label: const Text('Scan pickup bottles'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
+
+  Widget _orderDetailsCard(PickupOrder? order) {
+    const ink = Color(0xFF07344C);
+    const blue = Color(0xFF087DA9);
+    const muted = Color(0xFF64748B);
+    return RiderScanCard(
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE3F4FA),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                Icons.assignment_return_outlined,
+                color: blue,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Order details',
+                    style: TextStyle(
+                      color: muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    order == null
+                        ? 'Ready for pickup'
+                        : 'Order #${order.orderId}',
+                    style: const TextStyle(
+                      color: ink,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (order != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Delivery #${order.deliveryId}',
+                      style: const TextStyle(color: muted, fontSize: 12),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        if (order == null)
+          const Text(
+            'Scan the first bottle. Its order and customer will appear here.',
+            style: TextStyle(color: muted, height: 1.5),
+          )
+        else ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF0F7FB),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.person_outline, color: blue, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'CUSTOMER',
+                        style: TextStyle(
+                          color: muted,
+                          fontSize: 10,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        order.customerName,
+                        style: const TextStyle(
+                          color: ink,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Bottles to collect',
+            style: TextStyle(color: ink, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          ...order.bottleTypes.map(
+            (type) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.water_drop_outlined, size: 18, color: blue),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      type.bottleType,
+                      style: const TextStyle(color: ink),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${type.remainingBottleCount} to collect',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        color: blue,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Divider(height: 1, color: Color(0xFFE2EDF3)),
+          ),
+          const Text(
+            'Pickup progress',
+            style: TextStyle(color: ink, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '$_currentPickedUpCount of ${order.deliveredBottleCount} bottles',
+            style: const TextStyle(
+              color: blue,
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+            ),
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: order.deliveredBottleCount <= 0
+                  ? 0
+                  : (_currentPickedUpCount / order.deliveredBottleCount).clamp(
+                      0.0,
+                      1.0,
+                    ),
+              minHeight: 7,
+              color: blue,
+              backgroundColor: const Color(0xFFE2F0F7),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '$_remainingBottleCount remaining after this batch',
+            style: const TextStyle(color: muted, fontSize: 12),
+          ),
+          if (_scannedBottles.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              '${_scannedBottles.length} scanned in this batch · awaiting confirmation',
+              style: const TextStyle(color: Color(0xFFA76012), fontSize: 12),
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+
   Future<void> _loadBalance() async {
+    final deliveryId = _order!.deliveryId;
     setState(() => _loadingBalance = true);
     double? balance;
     try {
       final order = await _riderService.getOrderDetails(
-        orderId: widget.order.orderId,
+        orderId: _order!.orderId,
         accId: widget.account.accId,
       );
       final amount = order.outstandingAmount;
@@ -115,7 +458,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     } catch (_) {
       // Pickup remains available; confirmation checks the balance again.
     }
-    if (!mounted) return;
+    if (!mounted || _order?.deliveryId != deliveryId) return;
     setState(() {
       _outstandingBalance = balance;
       _loadingBalance = false;
@@ -123,8 +466,9 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
   }
 
   int get _remainingBottleCount {
+    if (_order == null) return 1;
     final remaining =
-        widget.order.deliveredBottleCount -
+        _order!.deliveredBottleCount -
         _alreadyPickedUpCount -
         _scannedBottles.length;
 
@@ -163,8 +507,24 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       _scanMessage = null;
     });
     try {
+      final matched = await _riderService.getPickupOrderForBottle(
+        widget.account.accId,
+        bottleNumber,
+      );
+      if (!mounted) return;
+      if (_order != null && matched.deliveryId != _order!.deliveryId) {
+        throw Exception(
+          'This bottle belongs to Order #${matched.orderId}. Confirm or clear the current batch before changing orders.',
+        );
+      }
       final results = await Future.wait<Object>([
-        _lookup.get(widget.account.accId, bottleNumber, 'PICKUP_SCAN'),
+        lookupBottleForScan(
+          context,
+          _lookup,
+          widget.account.accId,
+          bottleNumber,
+          'PICKUP_SCAN',
+        ),
         _batchLocation.get(),
       ]);
       if (!mounted) return;
@@ -195,7 +555,10 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
       final position = await _batchLocation.get();
       if (!mounted) return;
+      final firstScan = _order == null;
       setState(() {
+        _order = matched;
+        if (firstScan) _alreadyPickedUpCount = matched.pickedUpBottleCount;
         _scannedBottles.add(
           _PendingPickupBottle(
             bottleNumber: bottleNumber,
@@ -204,11 +567,13 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
             accuracy: position.accuracy,
             jumpReason: transition['jumpReason']?.toString(),
             previousScanEventId: transition['previousScanEventId'] as int?,
+            bottleTypeId: transition['bottleTypeId'] as int?,
           ),
         );
         _scanSuccess = true;
         _scanMessage = 'Scanned\n$bottleNumber';
       });
+      if (firstScan) _loadBalance();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -256,8 +621,8 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     try {
       final result = await _riderService.completePickup(
         accId: widget.account.accId,
-        orderId: widget.order.orderId,
-        deliveryId: widget.order.deliveryId,
+        orderId: _order!.orderId,
+        deliveryId: _order!.deliveryId,
         bottles: _scannedBottles
             .map(
               (item) => {
@@ -267,6 +632,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                 'accuracy': item.accuracy,
                 'jumpReason': item.jumpReason,
                 'previousScanEventId': item.previousScanEventId,
+                'bottleTypeId': item.bottleTypeId,
               },
             )
             .toList(),
@@ -276,7 +642,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
 
       final delivered = _toInt(
         result['deliveredCount'],
-        fallback: widget.order.deliveredBottleCount,
+        fallback: _order!.deliveredBottleCount,
       );
 
       final pickedUp = _toInt(
@@ -305,13 +671,13 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       if (remaining > 0) {
         await _showMessage(
           'Partial Pickup Completed',
-          '$pickedUp of $delivered bottles from Order #${widget.order.orderId} have been picked up.\n\n'
+          '$pickedUp of $delivered bottles from Order #${_order!.orderId} have been picked up.\n\n'
               '$remaining bottle${remaining == 1 ? '' : 's'} remain to be picked up later.',
         );
       } else {
         await _showMessage(
           'Pickup Completed',
-          'All $delivered bottles from Order #${widget.order.orderId} have been picked up successfully.',
+          'All $delivered bottles from Order #${_order!.orderId} have been picked up successfully.',
         );
       }
 
@@ -367,7 +733,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
       builder: (_) {
         final count = _scannedBottles.length;
         final afterPickupCount = _currentPickedUpCount;
-        final delivered = widget.order.deliveredBottleCount;
+        final delivered = _order!.deliveredBottleCount;
 
         return AlertDialog(
           title: const Text('Confirm Pickup'),
@@ -393,7 +759,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
   }
 
   Future<bool> _showPaymentDialog(double outstandingAmount) async {
-    _paymentAmountController.text = outstandingAmount.toStringAsFixed(2);
+    _paymentAmountController.text = '0';
     _paymentNotesController.clear();
     _receiptImage = null;
     _paymentType = 'CASH';
@@ -537,7 +903,7 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                           try {
                             await _riderService.createPayment(
                               accId: widget.account.accId,
-                              orderId: widget.order.orderId,
+                              orderId: _order!.orderId,
                               paymentAmount: amount,
                               paymentType: _paymentType,
                               receiptImage: _receiptImage,
@@ -694,13 +1060,66 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
     return double.tryParse(value.toString()) ?? 0;
   }
 
+  Future<void> _toggleCamera() async {
+    if (_isProcessing) return;
+    setState(() => _camera = !_camera);
+    try {
+      if (_camera) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (mounted && _camera) await _scannerController.start();
+      } else {
+        await _scannerController.stop();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _camera = false;
+          _scanSuccess = false;
+          _scanMessage =
+              'Unable to start camera. Check permissions and try again.';
+        });
+      }
+    }
+  }
+
+  Future<void> _enterNumber() async {
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
+    final controller = TextEditingController();
+    final number = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Enter Bottle Number'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Bottle number'),
+          onSubmitted: (value) => Navigator.pop(context, value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Add Bottle'),
+          ),
+        ],
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    controller.dispose();
+    if (!mounted) return;
+    setState(() => _isProcessing = false);
+    if (number != null && number.isNotEmpty) await _processBottle(number);
+  }
+
   @override
   Widget build(BuildContext context) {
     const blue = Color(0xFF087DA9);
-    final required = widget.order.deliveredBottleCount;
-    final completed = _currentPickedUpCount;
+    final order = _order;
     final busy = _isProcessing;
-    final balance = _outstandingBalance;
     return PopScope(
       canPop: !busy && _scannedBottles.isEmpty,
       onPopInvokedWithResult: (didPop, result) async {
@@ -711,7 +1130,6 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
         body: Column(
           children: [
             Container(
-              clipBehavior: Clip.antiAlias,
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   colors: [Color(0xFF07344C), Color(0xFF168DB8)],
@@ -722,81 +1140,44 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                   bottom: Radius.circular(28),
                 ),
               ),
-              child: Stack(
-                children: [
-                  Positioned(
-                    right: -35,
-                    top: -65,
-                    child: Container(
-                      width: 210,
-                      height: 210,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withValues(alpha: .08),
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 12, 20, 24),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: busy ? null : _handleBack,
+                        tooltip: 'Back',
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
                       ),
-                    ),
-                  ),
-                  SafeArea(
-                    bottom: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 14, 20, 24),
-                      child: Row(
-                        children: [
-                          IconButton(
-                            tooltip: 'Back',
-                            onPressed: busy ? null : _handleBack,
-                            icon: const Icon(
-                              Icons.arrow_back,
-                              color: Colors.white,
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'RIDER',
+                              style: TextStyle(
+                                color: Color(0xFFB8E6F5),
+                                fontSize: 11,
+                                letterSpacing: 1.8,
+                              ),
                             ),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Pickup',
-                                  style: TextStyle(
-                                    color: Color(0xFFB8E6F5),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                                const SizedBox(height: 5),
-                                const Text(
-                                  'Collect bottles',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 26,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 5,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFE0F3FB),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Text(
-                                    'Order #${widget.order.orderId}',
-                                    style: const TextStyle(
-                                      color: Color(0xFF075578),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                            SizedBox(height: 5),
+                            Text(
+                              'Pickup bottles',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 26,
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
             Expanded(
@@ -805,140 +1186,161 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: SizedBox(
-                        height: 220,
-                        child: BottleScannerView(
-                          controller: _scannerController,
-                          onDetect: _handleScan,
-                          enabled: !busy && _remainingBottleCount > 0,
-                          busy: busy,
-                          message: _scanMessage,
-                          success: _scanSuccess,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    RiderScanCard(
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            const Expanded(
-                              child: Text(
-                                'Collected',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF102B40),
-                                ),
-                              ),
-                            ),
-                            Flexible(
-                              child: Text(
-                                '$completed of $required bottles',
-                                textAlign: TextAlign.right,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF102B40),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: LinearProgressIndicator(
-                            value: required <= 0
-                                ? 0
-                                : (completed / required).clamp(0.0, 1.0),
-                            minHeight: 6,
-                            color: blue,
-                            backgroundColor: const Color(0xFFE2F0F7),
+                        Expanded(child: _pickupTab('Pickup bottles', false)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _pickupTab(
+                            _assignedLoaded
+                                ? 'Assigned deliveries (${_assignedOrders.length})'
+                                : 'Assigned deliveries',
+                            true,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    RiderScanCard(
-                      children: [
-                        Row(
+                    const SizedBox(height: 16),
+                    if (_viewAssigned) ...[
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: _loadingAssigned
+                              ? null
+                              : _loadAssignedOrders,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Refresh deliveries'),
+                        ),
+                      ),
+                      _assignedDeliveries(),
+                    ] else ...[
+                      Container(
+                        clipBehavior: Clip.antiAlias,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(22),
+                          gradient: const RadialGradient(
+                            colors: [Color(0xFF125574), Color(0xFF07344C)],
+                            radius: .9,
+                          ),
+                        ),
+                        child: _camera
+                            ? SizedBox(
+                                height: 260,
+                                child: BottleScannerView(
+                                  controller: _scannerController,
+                                  onDetect: _handleScan,
+                                  enabled: !busy && _remainingBottleCount > 0,
+                                  busy: busy,
+                                  message: _scanMessage,
+                                  success: _scanSuccess,
+                                ),
+                              )
+                            : InkWell(
+                                onTap: busy ? null : _toggleCamera,
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    vertical: 28,
+                                    horizontal: 16,
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.qr_code_scanner,
+                                        color: Color(0xFF99EAFF),
+                                        size: 64,
+                                      ),
+                                      SizedBox(height: 18),
+                                      Text(
+                                        'Start Scanning',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      SizedBox(height: 5),
+                                      Text(
+                                        'Scan a bottle to find its pickup order',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: Color(0xFFB8D6E5),
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                      ),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        children: [
+                          if (_camera)
+                            TextButton(
+                              onPressed: busy ? null : _toggleCamera,
+                              child: const Text('Stop Camera'),
+                            ),
+                          TextButton.icon(
+                            onPressed: busy ? null : _enterNumber,
+                            icon: const Icon(Icons.keyboard_outlined, size: 18),
+                            label: const Text('Enter Bottle Number'),
+                          ),
+                        ],
+                      ),
+                      if (_scanMessage != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Text(
+                            _scanMessage!,
+                            style: TextStyle(
+                              color: _scanSuccess ? blue : Colors.red,
+                            ),
+                          ),
+                        ),
+                      _orderDetailsCard(order),
+                      if (order != null) ...[
+                        const SizedBox(height: 12),
+                        RiderScanCard(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFE3F4FA),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(
-                                Icons.payments_outlined,
-                                color: blue,
-                                size: 22,
-                              ),
+                            Text(
+                              _loadingBalance
+                                  ? 'Checking balance...'
+                                  : _outstandingBalance == null
+                                  ? 'Balance unavailable'
+                                  : _outstandingBalance! > 0
+                                  ? '₱${_outstandingBalance!.toStringAsFixed(2)} outstanding'
+                                  : 'No outstanding balance',
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    _loadingBalance
-                                        ? 'Checking balance...'
-                                        : balance == null
-                                        ? 'Balance unavailable'
-                                        : balance > 0
-                                        ? '₱${balance.toStringAsFixed(2)} outstanding'
-                                        : 'No outstanding balance',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFF102B40),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    balance == null
-                                        ? 'Balance is checked again after pickup'
-                                        : balance > 0
-                                        ? 'Record full or partial payment after pickup'
-                                        : 'Payment is settled',
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Color(0xFF71869A),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                            const Text(
+                              'Payment is checked again after pickup.',
                             ),
-                            if (!_loadingBalance && balance == null)
-                              IconButton(
+                            if (!_loadingBalance && _outstandingBalance == null)
+                              TextButton(
                                 onPressed: busy ? null : _loadBalance,
-                                tooltip: 'Retry balance',
-                                icon: const Icon(Icons.refresh, color: blue),
+                                child: const Text('Retry balance'),
                               ),
                           ],
                         ),
                       ],
-                    ),
-                    if (_scannedBottles.isNotEmpty) ...[
                       const SizedBox(height: 12),
-                      ExpansionTile(
-                        title: Text(
-                          'Scanned bottles (${_scannedBottles.length})',
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                        children: _scannedBottles
-                            .map(
-                              (b) => ListTile(
-                                dense: true,
-                                leading: const Icon(
-                                  Icons.water_drop_outlined,
-                                  color: blue,
-                                ),
-                                title: Text(b.bottleNumber),
-                              ),
-                            )
+                      PendingBottleList(
+                        title: 'This batch',
+                        bottles: _scannedBottles
+                            .map((b) => b.bottleNumber)
                             .toList(),
+                        onRemove: busy
+                            ? null
+                            : (number) => setState(() {
+                                _scannedBottles.removeWhere(
+                                  (b) => b.bottleNumber == number,
+                                );
+                                if (_scannedBottles.isEmpty &&
+                                    widget.order == null) {
+                                  _order = null;
+                                  _alreadyPickedUpCount = 0;
+                                  _batchLocation.clear();
+                                }
+                              }),
                       ),
                     ],
                   ],
@@ -947,25 +1349,21 @@ class _PickupScanScreenState extends State<PickupScanScreen> {
             ),
           ],
         ),
-        bottomNavigationBar: SafeArea(
-          minimum: const EdgeInsets.fromLTRB(20, 10, 20, 16),
-          child: FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: blue,
-              minimumSize: const Size.fromHeight(52),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+        bottomNavigationBar: _viewAssigned
+            ? null
+            : SafeArea(
+                minimum: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: blue,
+                    minimumSize: const Size.fromHeight(52),
+                  ),
+                  onPressed: _scannedBottles.isNotEmpty && !busy
+                      ? _completePickup
+                      : null,
+                  child: Text(busy ? 'Please wait...' : 'Confirm pickup'),
+                ),
               ),
-            ),
-            onPressed: _scannedBottles.isNotEmpty && !busy
-                ? _completePickup
-                : null,
-            child: Text(
-              busy ? 'Please wait...' : 'Confirm pickup',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-        ),
       ),
     );
   }

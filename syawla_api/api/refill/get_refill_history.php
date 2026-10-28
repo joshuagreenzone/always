@@ -31,15 +31,15 @@ try {
             b.BottleNumber,
             b.BottleTypeID,
 
-            bt.BottleType,
-            bt.Price
+            COALESCE(bt.BottleType, 'Unregistered QR') AS BottleType,
+            COALESCE(bt.Price, 0) AS Price
 
         FROM refill r
 
         INNER JOIN bottles b
             ON r.BottleID = b.BottleID
 
-        INNER JOIN bottle_types bt
+        LEFT JOIN bottle_types bt
             ON b.BottleTypeID = bt.BottleTypeID
 
         ORDER BY

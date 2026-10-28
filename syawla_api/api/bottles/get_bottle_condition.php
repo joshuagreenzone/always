@@ -15,6 +15,21 @@ try {
     $db = (new Database())->connect();
     requireBottleConditionAccount($db, $accId);
     $bottle = getBottleCondition($db, $number);
+    if (!$bottle && ($preview = unregisteredQrPreview($number))) {
+        $eventType = (string) ($_GET['eventType'] ?? '');
+        if (!isset(SCAN_EXPECTED_PREVIOUS[$eventType])) {
+            throw new InvalidArgumentException('Invalid scan type.');
+        }
+        $preview['transition'] = [
+            'isCycleJump' => $eventType !== 'REFILL_SCAN',
+            'previousScanEventId' => null,
+            'previousEventType' => null,
+            'expectedPreviousEventType' => SCAN_EXPECTED_PREVIOUS[$eventType],
+        ];
+        $preview['vehicle'] = $preview;
+        echo json_encode(['success' => true, 'data' => $preview]);
+        exit;
+    }
     if (!$bottle) {
         throw new OutOfBoundsException('Bottle not found.');
     }

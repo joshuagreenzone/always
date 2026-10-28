@@ -19,6 +19,27 @@ try {
         exit;
     }
 
+    $bottleNumber = trim((string) ($_GET['bottleNumber'] ?? ''));
+    $deliveryFilter = '';
+    $params = [':accId' => $accId];
+    if ($bottleNumber !== '') {
+        $match = $db->prepare("SELECT odt.DeliveryID,
+            EXISTS (SELECT 1 FROM pickup p JOIN delivery_pickup_transaction dpt
+                ON dpt.PickUpID = p.PickUpID WHERE p.DeliveryID = odt.DeliveryID
+                AND dpt.BottleID = odt.BottleID) AS AlreadyPickedUp,
+            EXISTS (SELECT 1 FROM bottle_scan_event e WHERE e.ODTID = odt.ODTID
+                AND e.EventType IN ('UNLOAD_SCAN', 'REFILL_SCAN', 'LOAD_SCAN')
+                AND e.IsCycleJump = 1) AS ReturnedWithoutPickup
+            FROM order_delivery_transaction odt
+            JOIN bottles b ON b.BottleID = odt.BottleID
+            WHERE b.BottleNumber = ? ORDER BY odt.ODTID DESC LIMIT 1");
+        $match->execute([$bottleNumber]);
+        $deliveryFilter = ' AND d.DeliveryID = :matchedDeliveryId';
+        $matched = $match->fetch(PDO::FETCH_ASSOC);
+        $params[':matchedDeliveryId'] = $matched && !$matched['AlreadyPickedUp'] && !$matched['ReturnedWithoutPickup']
+            ? (int) $matched['DeliveryID'] : 0;
+    }
+
     /*
      * Get bottles actually delivered for each delivery
      * and bottle type. Undelivered bottles are excluded
@@ -103,7 +124,7 @@ try {
         WHERE d.AccID = :accId
           AND EXISTS
               (SELECT 1 FROM account_roles ar WHERE ar.AccID = a.AccID AND ar.Role = 'RIDER')
-          AND d.DeliveryStatus IN ('DELIVERED', 'INCOMPLETE')
+          AND d.DeliveryStatus IN ('DELIVERED', 'INCOMPLETE') {$deliveryFilter}
 
         GROUP BY
             d.DeliveryID,
@@ -133,7 +154,7 @@ try {
     ";
 
     $stmt = $db->prepare($sql);
-    $stmt->execute([':accId' => $accId]);
+    $stmt->execute($params);
 
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -180,7 +201,8 @@ try {
 
     echo json_encode([
         'success' => true,
-        'data' => array_values($deliveries)
+        'data' => array_values($deliveries),
+        'matchedBottleNumber' => $bottleNumber !== '' ? $bottleNumber : null
     ]);
 
 } catch (PDOException $e) {

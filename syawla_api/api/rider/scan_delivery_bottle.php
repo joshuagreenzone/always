@@ -581,6 +581,18 @@ try {
     $db->beginTransaction();
 
     try {
+        // Recheck assignment, cancellation and capacity while holding the parent rows.
+        $guard = $db->prepare('SELECT d.DeliveryStatus,o.OrderStatus,o.Quantity FROM delivery d JOIN orders o ON o.OrderID=d.OrderID WHERE d.DeliveryID=? AND d.OrderID=? AND d.AccID=? FOR UPDATE');
+        $guard->execute([$deliveryId,$orderId,$accId]);
+        $current = $guard->fetch(PDO::FETCH_ASSOC);
+        if (!$current || $current['OrderStatus'] === 'CANCELLED' || !in_array($current['DeliveryStatus'], ['ASSIGNED','OUT_FOR_DELIVERY','INCOMPLETE'], true)) {
+            throw new DomainException('This delivery is no longer open for scanning.');
+        }
+        $capacity = $db->prepare('SELECT ODTID FROM order_delivery_transaction WHERE OrderID=? AND DeliveryID=? FOR UPDATE');
+        $capacity->execute([$orderId,$deliveryId]);
+        $scannedCount = count($capacity->fetchAll(PDO::FETCH_ASSOC));
+        $requiredCount = (int)$current['Quantity'];
+        if ($scannedCount >= $requiredCount) throw new DomainException('All required bottles have already been scanned.');
         requireBottleReadyForDelivery($db, $bottleId);
         $db->prepare('SELECT BottleID FROM bottles WHERE BottleID = ? FOR UPDATE')->execute([$bottleId]);
         verifyVehicleBottle($db, $accId, $bottleNumber, 'DELIVERY', true);

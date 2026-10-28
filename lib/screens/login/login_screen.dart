@@ -74,8 +74,8 @@ class _LoginScreenState extends State<LoginScreen>
                         center: Alignment(xOffset, yOffset - 0.2),
                         radius: 1.2,
                         colors: [
-                          Colors.cyanAccent.withOpacity(0.35),
-                          Colors.blue.shade700.withOpacity(0.15),
+                          Colors.cyanAccent.withValues(alpha: 0.35),
+                          Colors.blue.shade700.withValues(alpha: 0.15),
                           Colors.transparent,
                         ],
                         stops: const [0.0, 0.5, 1.0],
@@ -92,7 +92,7 @@ class _LoginScreenState extends State<LoginScreen>
                         center: Alignment(-xOffset, -yOffset + 0.2),
                         radius: 1.4,
                         colors: [
-                          Colors.indigoAccent.withOpacity(0.4),
+                          Colors.indigoAccent.withValues(alpha: 0.4),
                           Colors.transparent,
                         ],
                         stops: const [0.0, 1.0],
@@ -102,7 +102,7 @@ class _LoginScreenState extends State<LoginScreen>
                 ),
 
                 // Main Screen Content
-                if (child != null) child,
+                ?child,
               ],
             ),
           );
@@ -130,7 +130,7 @@ class _LoginScreenState extends State<LoginScreen>
                         color: Colors.white,
                         shadows: [
                           Shadow(
-                            color: Colors.black.withOpacity(0.25),
+                            color: Colors.black.withValues(alpha: 0.25),
                             offset: const Offset(0, 3),
                             blurRadius: 6,
                           ),
@@ -144,7 +144,7 @@ class _LoginScreenState extends State<LoginScreen>
                       'Water Ordering & Delivery',
                       textAlign: TextAlign.center,
                       style: AppTextStyles.bodySecondary.copyWith(
-                        color: Colors.white.withOpacity(0.85),
+                        color: Colors.white.withValues(alpha: 0.85),
                       ),
                     ),
 
@@ -181,7 +181,7 @@ class _Logo extends StatelessWidget {
         border: Border.all(color: Colors.white, width: 3),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
+            color: Colors.black.withValues(alpha: 0.2),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),

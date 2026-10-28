@@ -15,11 +15,11 @@ try {
             b.BottleNumber,
             b.BottleOwner,
             b.BottleTypeID,
-            bt.BottleType,
-            bt.Price,
+            COALESCE(bt.BottleType, 'Unregistered QR') AS BottleType,
+            COALESCE(bt.Price, 0) AS Price,
             b.BottleRegDateTime
         FROM bottles b
-        INNER JOIN bottle_types bt
+        LEFT JOIN bottle_types bt
             ON b.BottleTypeID = bt.BottleTypeID
         ORDER BY b.BottleTypeID ASC, b.BottleNumber ASC
     ";

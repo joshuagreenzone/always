@@ -155,6 +155,7 @@ try {
             'longitude' => $longitude,
             'accuracy' => $accuracy,
             'jumpReason' => $bottle['jumpReason'] ?? null,
+            'bottleTypeId' => $bottle['bottleTypeId'] ?? null,
             'previousScanEventId' => $bottle['previousScanEventId'] ?? null
         ];
     }
@@ -382,6 +383,7 @@ try {
      */
     foreach ($normalizedBottles as $pendingBottle) {
         $bottleNumber = $pendingBottle['bottleNumber'];
+        saveUnregisteredQr($db, $bottleNumber, $accId, (int) ($pendingBottle['bottleTypeId'] ?? 0));
 
         $bottleStmt->execute([
             ':bottleNumber' => $bottleNumber

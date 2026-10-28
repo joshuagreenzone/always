@@ -29,6 +29,9 @@ class _InventoryService extends VehicleBottleService {
   String? savedAction;
   List<String>? savedNumbers;
   Map<String, Map<String, dynamic>>? savedJumpDetails;
+  Map<String, dynamic>? savedContext;
+  String? savedKey;
+  List<Map<String, dynamic>> carry = [];
   @override
   Future<Map<String, dynamic>> verify(
     int accId,
@@ -47,11 +50,15 @@ class _InventoryService extends VehicleBottleService {
     List<String> numbers,
     String action, {
     Map<String, Map<String, dynamic>> jumpDetails = const {},
+    Map<String, dynamic>? loadContext,
+    String? requestKey,
   }) async {
     saves++;
     if (failSave) throw Exception('Unable to connect to the server.');
     savedNumbers = List.of(numbers);
     savedJumpDetails = Map.of(jumpDetails);
+    savedContext = loadContext;
+    savedKey = requestKey;
     savedAction = action;
     returned = true;
     return {'count': numbers.length};
@@ -84,6 +91,12 @@ class _InventoryService extends VehicleBottleService {
           {'batchId': 2, 'count': 1, 'scannedAt': '2026-10-12 16:00:00'},
         {'batchId': 1, 'count': 4, 'scannedAt': '2026-10-12 15:00:00'},
       ],
+      'loadContext': {
+        'previousBatchId': carry.isEmpty ? 0 : 7,
+        'bottles': carry,
+      },
+      'trips': <dynamic>[],
+      'tripsToday': 0,
     };
   }
 }
@@ -117,7 +130,14 @@ Future<void> _openReturn(
 }
 
 Future<void> _enterBottle(WidgetTester tester) async {
+  await tester.scrollUntilVisible(
+    find.text('Enter Bottle Number'),
+    160,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await tester.pumpAndSettle();
   await tester.ensureVisible(find.text('Enter Bottle Number'));
+  await tester.pumpAndSettle();
   await tester.tap(find.text('Enter Bottle Number'));
   await tester.pumpAndSettle();
   await tester.enterText(find.byType(TextField), 'COLLECTED-2');
@@ -134,6 +154,81 @@ final _account = Account(
 );
 
 void main() {
+  for (final confirm in [false, true]) {
+    testWidgets(
+      'Carry-over ${confirm ? 'confirmation retains bottles and permits carry-only save' : 'cancel blocks a new scan'}',
+      (tester) async {
+        final service = _InventoryService()
+          ..carry = [
+            {
+              'bottleId': 1,
+              'bottleNumber': 'RG-0001',
+              'scanEventId': 10,
+              'sourceBatchId': 7,
+            },
+            {
+              'bottleId': 2,
+              'bottleNumber': 'SG-0002',
+              'scanEventId': 11,
+              'sourceBatchId': 7,
+            },
+          ];
+        await tester.pumpWidget(
+          MaterialApp(
+            home: VehicleScanScreen(
+              account: _account,
+              returning: false,
+              service: service,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Undelivered bottles from previous batch'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('RG-0001\nSG-0002'), findsOneWidget);
+        expect(service.saves, 0);
+        await tester.tap(find.text(confirm ? 'Confirm carry-over' : 'Cancel'));
+        await tester.pumpAndSettle();
+        if (!confirm) {
+          expect(find.text('Enter Bottle Number'), findsNothing);
+          expect(find.text('Start Scanning'), findsNothing);
+          final save = tester.widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Review and save loading'),
+          );
+          expect(save.onPressed, isNull);
+          expect(service.saves, 0);
+          return;
+        }
+        await tester.scrollUntilVisible(
+          find.text('2 carried over + 0 newly scanned'),
+          160,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(find.text('2 carried over + 0 newly scanned'), findsOneWidget);
+        await tester.scrollUntilVisible(
+          find.text('RG-0001'),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(find.text('RG-0001'), findsOneWidget);
+        final removeButtons = tester.widgetList<TextButton>(
+          find.widgetWithText(TextButton, 'Remove'),
+        );
+        expect(removeButtons.every((b) => b.onPressed == null), isTrue);
+        await tester.tap(find.text('Review and save loading'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Confirm'));
+        await tester.pumpAndSettle();
+        expect(service.savedNumbers, ['RG-0001', 'SG-0002']);
+        expect(service.savedContext!['previousBatchId'], 7);
+        expect(service.savedKey, isNotEmpty);
+        expect(service.saves, 1);
+        expect(service.savedJumpDetails, isEmpty);
+      },
+    );
+  }
   for (final returning in [false, true]) {
     testWidgets(
       'Confirmed ${returning ? 'return' : 'loading'} returns home with a success message',

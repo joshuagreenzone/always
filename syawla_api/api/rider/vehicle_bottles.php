@@ -21,13 +21,19 @@ try {
             $stmt = $db->prepare("SELECT BatchID AS batchId, BottleCount AS count, ScannedAt AS scannedAt
                 FROM vehicle_scan_batch WHERE AccID = ? AND Action = 'RETURN' ORDER BY BatchID DESC LIMIT 10");
             $stmt->execute([$accId]);
-            $data = ['bottles' => $bottles, 'returns' => $stmt->fetchAll(PDO::FETCH_ASSOC), 'labels' => BOTTLE_CYCLE_LABELS];
+            $data = ['bottles' => $bottles, 'returns' => $stmt->fetchAll(PDO::FETCH_ASSOC), 'labels' => BOTTLE_CYCLE_LABELS,
+                'loadContext' => getLoadContext($db, $accId)] + riderLoadTrips($db, $accId);
         }
     } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
         if (!is_array($input) || !is_array($input['bottleNumbers'] ?? null)) throw new InvalidArgumentException('Bottle numbers are required.');
+        if (($input['action'] ?? '') === 'LOAD' && (!is_array($input['loadContext'] ?? null) || !is_string($input['requestKey'] ?? null))) {
+            throw new InvalidArgumentException('Reopen Load for Delivery to review previous bottles before starting a trip.');
+        }
+        $db->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         $db->beginTransaction();
-        $data = saveVehicleBatch($db, (int) ($input['accId'] ?? 0), (string) ($input['action'] ?? ''), $input['bottleNumbers'], $input['jumpDetails'] ?? []);
+        $data = saveVehicleBatch($db, (int) ($input['accId'] ?? 0), (string) ($input['action'] ?? ''), $input['bottleNumbers'], $input['jumpDetails'] ?? [],
+            $input['loadContext'] ?? null, $input['requestKey'] ?? null);
         $db->commit();
     } else {
         http_response_code(405);

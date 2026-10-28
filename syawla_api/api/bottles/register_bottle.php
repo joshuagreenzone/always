@@ -4,6 +4,7 @@ header('Content-Type: application/json');
 
 require_once '../../config/database.php';
 require_once __DIR__ . '/../../services/account_roles.php';
+require_once __DIR__ . '/../../services/bottle_registration_number.php';
 
 function respond(
     bool $success,
@@ -208,7 +209,7 @@ try {
      *
      * The legacy QR value is stored directly as BottleNumber.
      *
-     * We intentionally DO NOT inspect its prefix.
+     * Registration format is checked against the selected type before insertion.
      * ----------------------------------------------------------
      */
 
@@ -285,6 +286,10 @@ try {
         );
     }
 
+
+    if (!isRegistrationBottleNumber($bottleNumber, (string) $bottleType['BottlePrefix'])) {
+        respond(false, 'Invalid bottle number. Use ' . trim($bottleType['BottlePrefix']) . '-0000 or A-0000 (legacy QR), with exactly four digits.', 400);
+    }
 
     /*
      * ----------------------------------------------------------

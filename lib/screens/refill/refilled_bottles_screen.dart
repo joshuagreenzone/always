@@ -5,7 +5,6 @@ import '../../services/refill_service.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_sizes.dart';
 import '../../theme/app_spacing.dart';
-import '../../theme/app_text_styles.dart';
 
 class RefilledBottlesScreen extends StatefulWidget {
   const RefilledBottlesScreen({super.key});
@@ -146,7 +145,7 @@ class _RefilledBottlesScreenState extends State<RefilledBottlesScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppColors.error.withOpacity(0.1),
+                color: AppColors.error.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -223,7 +222,7 @@ class _RefilledBottlesScreenState extends State<RefilledBottlesScreen> {
             child: Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: const Color(0xFF0284C7).withOpacity(0.1),
+                color: const Color(0xFF0284C7).withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -309,10 +308,10 @@ class _RefillCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: style.color.withOpacity(0.35), width: 1.5),
+        border: Border.all(color: style.color.withValues(alpha: 0.35), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: style.color.withOpacity(0.12),
+            color: style.color.withValues(alpha: 0.12),
             blurRadius: 14,
             offset: const Offset(0, 5),
           ),
@@ -337,7 +336,7 @@ class _RefillCard extends StatelessWidget {
                     color: style.bgColor,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: style.color.withOpacity(0.4),
+                      color: style.color.withValues(alpha: 0.4),
                       width: 1,
                     ),
                   ),
@@ -366,10 +365,10 @@ class _RefillCard extends StatelessWidget {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: successColor.withOpacity(0.12),
+                    color: successColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: successColor.withOpacity(0.3),
+                      color: successColor.withValues(alpha: 0.3),
                       width: 1,
                     ),
                   ),
@@ -405,7 +404,7 @@ class _RefillCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: style.color.withOpacity(0.12),
+                    color: style.color.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(

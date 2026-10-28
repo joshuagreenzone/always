@@ -95,9 +95,16 @@ class _BottleConditionDialogState extends State<BottleConditionDialog> {
   final _formKey = GlobalKey<FormState>();
   final _noteController = TextEditingController();
   String _condition = 'HEALTHY';
+  final Set<int> _repairSupplyIds = {};
   bool _isSaving = false;
   String? _error;
   BottleCondition? _saved;
+
+  @override
+  void initState() {
+    super.initState();
+    _condition = widget.bottle.isHealthy ? 'DAMAGED' : 'HEALTHY';
+  }
 
   @override
   void dispose() {
@@ -117,6 +124,10 @@ class _BottleConditionDialogState extends State<BottleConditionDialog> {
         bottle: widget.bottle,
         condition: _condition,
         note: _noteController.text,
+        repairSupplyIds:
+            widget.bottle.condition == 'DAMAGED' && _condition == 'HEALTHY'
+            ? _repairSupplyIds.toList()
+            : const [],
       );
       if (!mounted) return;
       setState(() {
@@ -173,6 +184,10 @@ class _BottleConditionDialogState extends State<BottleConditionDialog> {
                           Text('Bottle: ${saved.bottleNumber}'),
                           Text('Owner: ${saved.ownerLabel}'),
                           Text('State: ${saved.condition}'),
+                          if (saved.partsUsed > 0)
+                            Text(
+                              'Replacement parts used: ${saved.partsUsed} piece(s).',
+                            ),
                           if (saved.updatedAt != null)
                             Text(
                               'Updated: ${_dateLabel(saved.updatedAt!)} (server time)',
@@ -262,6 +277,44 @@ class _BottleConditionDialogState extends State<BottleConditionDialog> {
                               ],
                             ),
                             const SizedBox(height: 12),
+                            if (widget.bottle.condition == 'DAMAGED' &&
+                                _condition == 'HEALTHY') ...[
+                              const Text(
+                                'Caps or spigots used (optional)',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              const Text(
+                                'Select any caps or spigots used to repair this bottle. One piece per selected part will be deducted from inventory. Refill seals are separate.',
+                              ),
+                              for (final part in widget.bottle.repairParts)
+                                CheckboxListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text(part.name),
+                                  subtitle: Text(
+                                    '${part.quantityOnHand} in stock',
+                                  ),
+                                  value: _repairSupplyIds.contains(
+                                    part.supplyId,
+                                  ),
+                                  onChanged:
+                                      _isSaving || part.quantityOnHand < 1
+                                      ? null
+                                      : (selected) => setState(() {
+                                          if (selected == true) {
+                                            _repairSupplyIds.add(part.supplyId);
+                                          } else {
+                                            _repairSupplyIds.remove(
+                                              part.supplyId,
+                                            );
+                                          }
+                                        }),
+                                ),
+                              if (widget.bottle.repairParts.isEmpty)
+                                const Text(
+                                  'No compatible replacement parts are configured.',
+                                ),
+                              const SizedBox(height: 12),
+                            ],
                             TextFormField(
                               controller: _noteController,
                               enabled: !_isSaving,

@@ -30,6 +30,7 @@ class BottleConditionService {
     required BottleCondition bottle,
     required String condition,
     required String note,
+    List<int> repairSupplyIds = const [],
   }) async {
     try {
       final response = await _dio.post(
@@ -40,6 +41,7 @@ class BottleConditionService {
           'expectedCondition': bottle.condition,
           'condition': condition,
           'note': note.trim(),
+          'repairSupplyIds': repairSupplyIds,
         },
       );
       return _parseResponse(response.data);

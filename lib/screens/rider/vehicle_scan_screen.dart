@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:intl/intl.dart';
@@ -6,11 +8,14 @@ import '../../models/account.dart';
 import '../../services/vehicle_bottle_service.dart';
 import '../../services/scan_transition_service.dart';
 import '../../services/scan_lookup_service.dart';
+import '../../widgets/common/unregistered_qr_dialog.dart';
+import '../../models/qr_registration.dart';
 import '../../services/bottle_condition_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/common/bottle_condition_dialog.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 import '../../widgets/common/rider_scan_card.dart';
+import '../../widgets/common/load_trip_history.dart';
 import '../../widgets/common/scan_jump_dialog.dart';
 
 class VehicleScanScreen extends StatefulWidget {
@@ -42,10 +47,20 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
   late final _lookup = widget.lookupService ?? ScanLookupService();
   List<Map<String, dynamic>> _inventory = [];
   List<Map<String, dynamic>> _returns = [];
+  List<Map<String, dynamic>> _trips = [];
+  int _tripsToday = 0;
+  Map<String, dynamic>? _loadContext;
+  final Set<String> _carried = {};
+  late bool _loadReady = widget.returning;
+  final String _requestKey = List.generate(
+    32,
+    (_) => Random.secure().nextInt(16).toRadixString(16),
+  ).join();
   bool _busy = false;
   bool _viewVehicle = false;
   bool _camera = false;
   bool _loadingInventory = true;
+  bool _refreshing = false;
   String? _error;
   String? _inventoryError;
   String? _success;
@@ -69,6 +84,8 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
   }
 
   Future<void> _refresh() async {
+    if (_refreshing) return;
+    _refreshing = true;
     if (mounted) setState(() => _loadingInventory = true);
     try {
       final data = await _service.getInventory(widget.account.accId);
@@ -78,10 +95,72 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
             .map((b) => Map<String, dynamic>.from(b))
             .toList();
         _inventoryError = null;
+        _loadingInventory = false;
         _returns = (data['returns'] as List)
             .map((b) => Map<String, dynamic>.from(b))
             .toList();
+        _trips = (data['trips'] as List? ?? [])
+            .map((b) => Map<String, dynamic>.from(b))
+            .toList();
+        _tripsToday = (data['tripsToday'] as num? ?? 0).toInt();
       });
+      if (!widget.returning && !_loadReady) {
+        if (data['loadContext'] is! Map) {
+          throw Exception('Update the mobile API to support load trips.');
+        }
+        final snapshot = Map<String, dynamic>.from(data['loadContext']);
+        final previous = (snapshot['bottles'] as List)
+            .map((b) => Map<String, dynamic>.from(b))
+            .toList();
+        var confirmed = previous.isEmpty;
+        if (previous.isNotEmpty) {
+          confirmed =
+              await showDialog<bool>(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => AlertDialog(
+                  title: const Text('Undelivered bottles from previous batch'),
+                  content: SingleChildScrollView(
+                    child: Text(
+                      'There are still ${_bottles(previous.length)} from your previous batch that have not been delivered.\n\n'
+                      '${previous.map((b) => b['bottleNumber']).join('\n')}\n\nCarry these bottles into your new batch?',
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Confirm carry-over'),
+                    ),
+                  ],
+                ),
+              ) ==
+              true;
+        }
+        if (!mounted) return;
+        if (!confirmed) {
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+            return;
+          }
+          setState(
+            () => _inventoryError = 'Loading cancelled. Confirm the previous bottles before starting a new batch.',
+          );
+          return;
+        }
+        setState(() {
+          _loadContext = snapshot;
+          _loadReady = true;
+          for (final b in previous) {
+            final number = b['bottleNumber'].toString();
+            _pending.add(number);
+            _carried.add(number.toLowerCase());
+          }
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(
@@ -90,6 +169,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
         );
       }
     } finally {
+      _refreshing = false;
       if (mounted) setState(() => _loadingInventory = false);
     }
   }
@@ -97,7 +177,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
   String _message(Object e) => e.toString().replaceFirst('Exception: ', '');
 
   Future<void> _toggleCamera() async {
-    if (_busy) return;
+    if (_busy || !_loadReady) return;
     setState(() => _camera = !_camera);
     try {
       if (_camera) {
@@ -133,7 +213,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
   }
 
   Future<void> _enterNumber() async {
-    if (_busy) return;
+    if (_busy || !_loadReady) return;
     setState(() => _busy = true);
     final controller = TextEditingController();
     final number = await showDialog<String>(
@@ -171,7 +251,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
   }
 
   Future<void> _addBottle(String number) async {
-    if (_busy) return;
+    if (_busy || !_loadReady) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -190,7 +270,9 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
       }
       final lookup =
           widget.conditionService == null && widget.transitionService == null
-          ? await _lookup.get(
+          ? await lookupBottleForScan(
+              context,
+              _lookup,
               widget.account.accId,
               number,
               widget.returning ? 'UNLOAD_SCAN' : 'LOAD_SCAN',
@@ -242,7 +324,7 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
   }
 
   Future<void> _save() async {
-    if (_busy || _pending.isEmpty) return;
+    if (_busy || !_loadReady || _pending.isEmpty) return;
     setState(() => _busy = true);
     try {
       if (_camera) {
@@ -281,11 +363,13 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
         List.of(_pending),
         _action,
         jumpDetails: _jumpDetails,
+        loadContext: widget.returning ? null : _loadContext,
+        requestKey: _requestKey,
       );
       if (!mounted) return;
       final count = (result['count'] as num).toInt();
       final message =
-          '${_bottles(count)} ${widget.returning ? 'returned to the station' : 'loaded for delivery'}. Saved successfully.';
+          '${_bottles(count)} ${widget.returning ? 'returned to the station' : 'loaded for delivery'}. Saved successfully.${result['batchCode'] == null ? '' : ' Trip ${result['batchCode']} (${result['carriedCount']} carried over).'}';
       setState(() {
         _pending.clear();
         _jumpDetails.clear();
@@ -334,6 +418,51 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
   }
 
   String _bottles(int count) => '$count ${count == 1 ? 'bottle' : 'bottles'}';
+
+  void _showTripHistory() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.surface,
+      builder: (context) => FractionallySizedBox(
+        heightFactor: .85,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Trip history',
+                      style: TextStyle(
+                        color: AppColors.primaryDark,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 22,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close trip history',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                children: [LoadTripHistory(trips: _trips)],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   String _dateLabel(dynamic value) {
     final date = DateTime.tryParse(value.toString());
@@ -442,6 +571,12 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
                 if (_loadingInventory) const LinearProgressIndicator(),
                 if (_inventoryError != null)
                   _feedback(_inventoryError!, error: true),
+                if (!widget.returning)
+                  LoadTripSummary(
+                    count: _tripsToday,
+                    loading: _loadingInventory,
+                    onViewTrips: _showTripHistory,
+                  ),
                 if (_viewVehicle) ...[
                   if (_current.isEmpty &&
                       !_loadingInventory &&
@@ -473,6 +608,10 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
                       ]),
                     ),
                   ),
+                  if (!widget.returning) ...[
+                    const SizedBox(height: 14),
+                    LoadTripHistory(trips: _trips),
+                  ],
                   if (widget.returning) ...[
                     const SizedBox(height: 12),
                     _panel([
@@ -504,6 +643,14 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
                       ),
                     ]),
                   ],
+                ] else if (!_loadReady) ...[
+                  const Text(
+                    'Confirm previous bottles before scanning a new batch.',
+                  ),
+                  TextButton(
+                    onPressed: _loadingInventory ? null : _refresh,
+                    child: const Text('Review previous bottles'),
+                  ),
                 ] else ...[
                   Container(
                     clipBehavior: Clip.antiAlias,
@@ -645,6 +792,10 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
+                    if (!widget.returning)
+                      Text(
+                        '${_carried.length} carried over + ${_pending.length - _carried.length} newly scanned',
+                      ),
                     const Text(
                       'Up to 200 bottles per batch',
                       style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
@@ -683,7 +834,10 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
                                 children: [
                                   Text(
                                     number,
-                                    style: const TextStyle(
+                                    style: TextStyle(
+                                      color: isUnregisteredQr(number)
+                                          ? Colors.orange.shade900
+                                          : null,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
@@ -691,12 +845,23 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
                                   Text(
                                     widget.returning
                                         ? 'Ready to return'
+                                        : _carried.contains(
+                                            number.toLowerCase(),
+                                          )
+                                        ? 'Carried over from previous batch'
                                         : 'Ready to load',
                                     style: TextStyle(
                                       color: Color(0xFF64748B),
                                       fontSize: 12,
                                     ),
                                   ),
+                                  if (isUnregisteredQr(number))
+                                    Text(
+                                      'Unregistered QR',
+                                      style: TextStyle(
+                                        color: Colors.orange.shade900,
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -705,7 +870,9 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
                                 foregroundColor: const Color(0xFFA76012),
                                 backgroundColor: const Color(0xFFFFF1DB),
                               ),
-                              onPressed: _busy
+                              onPressed:
+                                  _busy ||
+                                      _carried.contains(number.toLowerCase())
                                   ? null
                                   : () => setState(() {
                                       _pending.remove(number);
@@ -739,7 +906,9 @@ class _VehicleScanScreenState extends State<VehicleScanScreen> {
                   borderRadius: BorderRadius.circular(14),
                 ),
               ),
-              onPressed: _busy || _pending.isEmpty ? null : _save,
+              onPressed: _busy || !_loadReady || _pending.isEmpty
+                  ? null
+                  : _save,
               icon: Icon(
                 widget.returning
                     ? Icons.warehouse_outlined

@@ -3,6 +3,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../services/batch_scan_location.dart';
 import '../../services/scan_lookup_service.dart';
+import '../../widgets/common/unregistered_qr_dialog.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 import '../../widgets/common/rider_scan_card.dart';
 import '../../widgets/common/scan_jump_dialog.dart';
@@ -85,7 +86,13 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
       // Start GPS on the first scan while the bottle lookup is in flight.
       // Future.wait observes both errors; later scans reuse the same GPS fix.
       final results = await Future.wait<Object>([
-        _lookup.get(widget.account.accId, bottleNumber, 'DELIVERY_SCAN'),
+        lookupBottleForScan(
+          context,
+          _lookup,
+          widget.account.accId,
+          bottleNumber,
+          'DELIVERY_SCAN',
+        ),
         _batchLocation.get(),
       ]);
       if (!mounted) return;
@@ -131,6 +138,7 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
             accuracy: position.accuracy,
             jumpReason: transition['jumpReason']?.toString(),
             previousScanEventId: transition['previousScanEventId'] as int?,
+            bottleTypeId: transition['bottleTypeId'] as int?,
           ),
         );
         _scanSuccess = true;
@@ -191,6 +199,7 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
         'accuracy': item.accuracy,
         'jumpReason': item.jumpReason,
         'previousScanEventId': item.previousScanEventId,
+        'bottleTypeId': item.bottleTypeId,
       };
     }).toList();
 
@@ -352,6 +361,13 @@ class _DeliveryScanScreenState extends State<DeliveryScanScreen> {
                 PendingBottleList(
                   title: 'Bottles to Deliver',
                   bottles: _scannedBottles.map((b) => b.bottleNumber).toList(),
+                  onRemove: busy
+                      ? null
+                      : (number) => setState(() {
+                          _scannedBottles.removeWhere(
+                            (b) => b.bottleNumber == number,
+                          );
+                        }),
                 ),
               ],
             ),
@@ -382,6 +398,7 @@ class _PendingDeliveryBottle {
   final double accuracy;
   final String? jumpReason;
   final int? previousScanEventId;
+  final int? bottleTypeId;
 
   const _PendingDeliveryBottle({
     required this.bottleNumber,
@@ -390,5 +407,6 @@ class _PendingDeliveryBottle {
     required this.accuracy,
     this.jumpReason,
     this.previousScanEventId,
+    this.bottleTypeId,
   });
 }

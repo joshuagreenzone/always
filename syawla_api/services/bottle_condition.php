@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/account_roles.php';
+require_once __DIR__ . '/bottle_repair.php';
+require_once __DIR__ . '/unregistered_qr.php';
 
 class BottleConditionConflict extends DomainException {}
 
@@ -14,7 +16,7 @@ function requireBottleConditionAccount(PDO $db, int $accId): void
 function getBottleCondition(PDO $db, string $number, bool $lock = false): ?array
 {
     $stmt = $db->prepare('
-        SELECT BottleID, BottleNumber, BottleCondition, BottleOwner
+        SELECT BottleID, BottleNumber, BottleCondition, BottleOwner, BottleTypeID
         FROM bottles WHERE BottleNumber = :number LIMIT 1
         ' . ($lock ? 'FOR UPDATE' : ''));
     $stmt->execute([':number' => $number]);
@@ -24,17 +26,30 @@ function getBottleCondition(PDO $db, string $number, bool $lock = false): ?array
     }
 
     $stmt = $db->prepare('
-        SELECT Note, UpdatedAt, AccID
+        SELECT ConditionHistoryID, Note, UpdatedAt, AccID
         FROM bottle_condition_history WHERE BottleID = :bottleId
         ORDER BY ConditionHistoryID DESC LIMIT 1');
     $stmt->execute([':bottleId' => $bottle['BottleID']]);
     $history = $stmt->fetch(PDO::FETCH_ASSOC);
+    $partsUsed = [];
+    if ($history) {
+        $stmt = $db->prepare("SELECT s.SupplyName name,m.SupplyID supplyId,-m.QuantityChange quantity,m.MovementID movementId
+            FROM inventory_supply_movement m JOIN inventory_supply s ON s.SupplyID=m.SupplyID
+            WHERE m.RequestKey LIKE ? AND m.RequestKey=CONCAT('repair-',?,'-',m.SupplyID) ORDER BY m.SupplyID");
+        $stmt->execute(['repair-'.$history['ConditionHistoryID'].'-%',$history['ConditionHistoryID']]);
+        $partsUsed = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 
     return [
         'bottleId' => (int) $bottle['BottleID'],
+        'isUnregistered' => isUnregisteredQr($bottle['BottleNumber']),
+        'isNewUnregistered' => isUnregisteredQr($bottle['BottleNumber']) && empty($bottle['BottleTypeID']),
         'bottleNumber' => $bottle['BottleNumber'],
         'bottleOwner' => $bottle['BottleOwner'],
         'condition' => $bottle['BottleCondition'],
+        'repairParts' => $bottle['BottleCondition'] === 'HEALTHY' ? [] : bottleRepairParts($db,(int)$bottle['BottleID']),
+        'partsUsed' => count($partsUsed),
+        'repairPartsUsed' => $partsUsed,
         'note' => $history['Note'] ?? null,
         'updatedAt' => $history['UpdatedAt'] ?? null,
         'updatedBy' => isset($history['AccID']) ? (int) $history['AccID'] : null,
@@ -50,12 +65,14 @@ function updateBottleCondition(
     string $number,
     string $expectedCondition,
     string $newCondition,
-    string $note
+    string $note,
+    array $repairSupplyIds = [],
+    bool $allowAdmin = false
 ): array {
     if (!$db->inTransaction()) {
         throw new LogicException('A bottle state update requires a transaction.');
     }
-    requireBottleConditionAccount($db, $accId);
+    if (!$allowAdmin || !accountHasRole($db,$accId,'ADMIN')) requireBottleConditionAccount($db, $accId);
     $conditions = ['HEALTHY', 'MISSING', 'DAMAGED'];
     if (!in_array($expectedCondition, $conditions, true) ||
         !in_array($newCondition, $conditions, true)) {
@@ -76,6 +93,10 @@ function updateBottleCondition(
         throw new InvalidArgumentException('Choose a different bottle state.');
     }
 
+    if ($repairSupplyIds && ($newCondition !== 'HEALTHY' || $expectedCondition === 'HEALTHY')) {
+        throw new InvalidArgumentException('Replacement parts can only be recorded when restoring an unhealthy bottle to Healthy.');
+    }
+
     $stmt = $db->prepare('SELECT RefillID FROM refill WHERE BottleID = :id ORDER BY RefillID DESC LIMIT 1 FOR UPDATE');
     $stmt->execute([':id' => $bottle['bottleId']]);
     $refillIdAtUpdate = (int) $stmt->fetchColumn();
@@ -93,7 +114,11 @@ function updateBottleCondition(
         ':note' => $note,
         ':refillId' => $refillIdAtUpdate
     ]);
-    return getBottleCondition($db, $number);
+    $historyId = (int)$db->lastInsertId();
+    consumeBottleRepairParts($db,$bottle['bottleId'],$number,$historyId,$accId,$repairSupplyIds);
+    $result = getBottleCondition($db, $number);
+    $result['partsUsed'] = count($repairSupplyIds);
+    return $result;
 }
 
 function requireHealthyBottle(PDO $db, int $bottleId, bool $allowDamagedPickup = false): void

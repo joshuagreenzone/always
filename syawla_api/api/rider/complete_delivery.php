@@ -299,7 +299,7 @@ try {
                 b.BottleTypeID,
                 bt.BottleType
             FROM bottles b
-            INNER JOIN bottle_types bt
+            LEFT JOIN bottle_types bt
                 ON bt.BottleTypeID = b.BottleTypeID
             WHERE b.BottleNumber = :bottleNumber
             LIMIT 1
@@ -430,6 +430,7 @@ try {
                 );
             }
 
+            saveUnregisteredQr($db, $bottleNumber, $accId, (int) ($item['bottleTypeId'] ?? 0));
             $bottleStmt->execute([
                 ':bottleNumber' => $bottleNumber
             ]);

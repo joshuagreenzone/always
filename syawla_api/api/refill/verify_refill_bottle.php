@@ -8,10 +8,10 @@ try {
     $number = trim((string) ($_GET['bottleNumber'] ?? ''));
     if ($number === '') throw new InvalidArgumentException('Bottle number is required.');
     $db = (new Database())->connect();
-    $stmt = $db->prepare('SELECT b.BottleID, b.BottleNumber, b.BottleTypeID,
-        b.BottleRegDateTime, b.BottleOwner, bt.BottleType, bt.Price
-        FROM bottles b INNER JOIN bottle_types bt ON bt.BottleTypeID = b.BottleTypeID
-        WHERE b.BottleNumber = ? LIMIT 1');
+    $stmt = $db->prepare("SELECT b.BottleID, b.BottleNumber, b.BottleTypeID,
+        b.BottleRegDateTime, b.BottleOwner, COALESCE(bt.BottleType, 'Unregistered QR') AS BottleType, COALESCE(bt.Price, 0) AS Price
+        FROM bottles b LEFT JOIN bottle_types bt ON bt.BottleTypeID = b.BottleTypeID
+        WHERE b.BottleNumber = ? LIMIT 1");
     $stmt->execute([$number]);
     $bottle = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$bottle) {

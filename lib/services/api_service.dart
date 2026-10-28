@@ -3,7 +3,10 @@ import 'package:dio/dio.dart';
 class ApiService {
   static const baseUrl = String.fromEnvironment(
     'SYAWLA_API_BASE_URL',
-    defaultValue: 'http://192.168.1.76/alwaysweb-ci4/mobile/',
+    // Local XAMPP / CodeIgniter API (same Wi-Fi as the phone).
+    defaultValue: 'http://192.168.1.76:8081/mobile/',
+    // Hosted API: comment the local default above and uncomment this line.
+    //defaultValue: 'https://always-system.greenzoneph.com/mobile/',
   );
 
   static String? _accessToken;

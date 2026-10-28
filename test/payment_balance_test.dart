@@ -55,17 +55,18 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('shows highlighted remaining balance and defaults amount to it', (
-    tester,
-  ) async {
-    await open(tester, BalanceService());
-    expect(find.text('Collect payment'), findsOneWidget);
-    expect(find.text('Amount due'), findsOneWidget);
-    expect(find.text('\u20b115.00'), findsOneWidget);
-    final amount = tester.widget<TextField>(find.byType(TextField).first);
-    expect(amount.controller!.text, '15.00');
-    expect(amount.enabled, isTrue);
-  });
+  testWidgets(
+    'shows highlighted remaining balance and defaults amount to zero',
+    (tester) async {
+      await open(tester, BalanceService());
+      expect(find.text('Collect payment'), findsOneWidget);
+      expect(find.text('Amount due'), findsOneWidget);
+      expect(find.text('\u20b115.00'), findsOneWidget);
+      final amount = tester.widget<TextField>(find.byType(TextField).first);
+      expect(amount.controller!.text, '0');
+      expect(amount.enabled, isTrue);
+    },
+  );
 
   testWidgets(
     'balance fetch failure allows retry without defaulting to order total',
@@ -83,7 +84,7 @@ void main() {
       expect(find.text('\u20b115.00'), findsOneWidget);
       expect(
         tester.widget<TextField>(find.byType(TextField).first).controller!.text,
-        '15.00',
+        '0',
       );
     },
   );
@@ -113,17 +114,23 @@ void main() {
   ) async {
     await open(tester, BalanceService());
     expect(find.text('Required for this payment method'), findsNothing);
+    expect(find.text('Add receipt photo'), findsNothing);
+    expect(find.byIcon(Icons.camera_alt_outlined), findsNothing);
     for (final method in ['GCash', 'Bank']) {
       await tester.tap(find.text(method));
       await tester.pumpAndSettle();
       expect(find.text('Required for this payment method'), findsOneWidget);
+      expect(find.text('Add receipt photo'), findsOneWidget);
+      expect(find.byIcon(Icons.camera_alt_outlined), findsOneWidget);
       expect(
         tester.widget<TextField>(find.byType(TextField).first).controller!.text,
-        '15.00',
+        '0',
       );
     }
     await tester.tap(find.text('Cash'));
     await tester.pumpAndSettle();
     expect(find.text('Required for this payment method'), findsNothing);
+    expect(find.text('Add receipt photo'), findsNothing);
+    expect(find.byIcon(Icons.camera_alt_outlined), findsNothing);
   });
 }

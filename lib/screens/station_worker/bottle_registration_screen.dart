@@ -88,6 +88,7 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
 
     setState(() {
       _selectedBottleType = value;
+      _scannedBottles.removeWhere((number) => !value.acceptsNumber(number));
 
       // Cost always starts at 0.00.
       // The worker can manually change it.
@@ -115,6 +116,7 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
         builder: (_) => BottleRegistrationScanScreen(
           onScanned: _handleScannedBottle,
           account: widget.account,
+          bottleType: _selectedBottleType!,
         ),
       ),
     );
@@ -123,7 +125,7 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
   Future<bool> _handleScannedBottle(String scannedValue) async {
     final bottleNumber = scannedValue.trim();
 
-    if (bottleNumber.isEmpty) {
+    if (_selectedBottleType?.acceptsNumber(bottleNumber) != true) {
       return false;
     }
 
@@ -451,9 +453,11 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.orange.withOpacity(0.08),
+                      color: Colors.orange.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.orange.withOpacity(0.4)),
+                      border: Border.all(
+                        color: Colors.orange.withValues(alpha: 0.4),
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -553,7 +557,7 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
 
     return Card(
       margin: EdgeInsets.zero,
-      color: hasError ? Colors.red.withOpacity(0.08) : null,
+      color: hasError ? Colors.red.withValues(alpha: 0.08) : null,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
@@ -624,7 +628,7 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           DropdownButtonFormField<BottleType>(
-                            value: _selectedBottleType,
+                            initialValue: _selectedBottleType,
                             decoration: const InputDecoration(
                               labelText: 'Bottle Type',
                               border: OutlineInputBorder(),
@@ -688,7 +692,7 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
                           ),
                           const SizedBox(height: 16),
                           DropdownButtonFormField<String>(
-                            value: _selectedCondition,
+                            initialValue: _selectedCondition,
                             decoration: const InputDecoration(
                               labelText: 'Bottle Condition',
                               border: OutlineInputBorder(),
@@ -735,6 +739,10 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
                             icon: const Icon(Icons.qr_code_scanner_rounded),
                             label: const Text('Scan Bottle QR'),
                           ),
+                          if (_selectedBottleType != null)
+                            Text(
+                              'Accepted formats: ${_selectedBottleType!.acceptedNumberExamples}. Legacy A codes use the bottle type selected above.',
+                            ),
                           const SizedBox(height: 20),
                           Row(
                             children: [
@@ -776,7 +784,7 @@ class _BottleRegistrationScreenState extends State<BottleRegistrationScreen> {
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: _scannedBottles.length,
-                              separatorBuilder: (_, __) =>
+                              separatorBuilder: (_, _) =>
                                   const SizedBox(height: 8),
                               itemBuilder: (context, index) =>
                                   _buildBottleListItem(context, index),

@@ -33,7 +33,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
   late final RiderService _riderService = widget.riderService ?? RiderService();
   final ImagePicker _imagePicker = ImagePicker();
 
-  final TextEditingController _amountController = TextEditingController();
+  final TextEditingController _amountController = TextEditingController(
+    text: '0',
+  );
 
   final TextEditingController _notesController = TextEditingController();
 
@@ -68,7 +70,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
       if (!mounted) return;
       setState(() {
         _remainingBalance = balance;
-        _amountController.text = balance.toStringAsFixed(2);
       });
     } catch (error) {
       if (mounted) {
@@ -472,65 +473,67 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       maxLines: 3,
                       decoration: _input('Add a note'),
                     ),
-                    const SizedBox(height: 14),
-                    if (_receiptImage != null) ...[
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: Image.file(
-                          _receiptImage!,
-                          height: 160,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-                    CustomPaint(
-                      painter: _ReceiptBorderPainter(),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
+                    if (_paymentType != 'CASH') ...[
+                      const SizedBox(height: 14),
+                      if (_receiptImage != null) ...[
+                        ClipRRect(
                           borderRadius: BorderRadius.circular(16),
-                          onTap: _isProcessing ? null : _takeReceiptPhoto,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 22,
-                              horizontal: 12,
-                            ),
-                            child: Column(
-                              children: [
-                                const Icon(
-                                  Icons.camera_alt_outlined,
-                                  color: blue,
-                                  size: 24,
-                                ),
-                                const SizedBox(height: 7),
-                                Text(
-                                  _receiptImage == null
-                                      ? 'Add receipt photo'
-                                      : 'Retake receipt photo',
-                                  style: const TextStyle(
+                          child: Image.file(
+                            _receiptImage!,
+                            height: 160,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      CustomPaint(
+                        painter: _ReceiptBorderPainter(),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: _isProcessing ? null : _takeReceiptPhoto,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 22,
+                                horizontal: 12,
+                              ),
+                              child: Column(
+                                children: [
+                                  const Icon(
+                                    Icons.camera_alt_outlined,
                                     color: blue,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13,
+                                    size: 24,
                                   ),
-                                ),
-                                if (_paymentType != 'CASH') ...[
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'Required for this payment method',
-                                    style: TextStyle(
-                                      color: Color(0xFF71869A),
-                                      fontSize: 11,
+                                  const SizedBox(height: 7),
+                                  Text(
+                                    _receiptImage == null
+                                        ? 'Add receipt photo'
+                                        : 'Retake receipt photo',
+                                    style: const TextStyle(
+                                      color: blue,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13,
                                     ),
                                   ),
+                                  if (_paymentType != 'CASH') ...[
+                                    const SizedBox(height: 4),
+                                    const Text(
+                                      'Required for this payment method',
+                                      style: TextStyle(
+                                        color: Color(0xFF71869A),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
                                 ],
-                              ],
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                     const SizedBox(height: 14),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(

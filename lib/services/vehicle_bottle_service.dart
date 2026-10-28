@@ -52,10 +52,14 @@ class VehicleBottleService {
     List<String> numbers,
     String action, {
     Map<String, Map<String, dynamic>> jumpDetails = const {},
+    Map<String, dynamic>? loadContext,
+    String? requestKey,
   }) => _request('POST', {
     'accId': accId,
     'bottleNumbers': numbers,
     'action': action,
     'jumpDetails': jumpDetails,
+    'loadContext': ?loadContext,
+    'requestKey': ?requestKey,
   });
 }

@@ -282,6 +282,45 @@ class RiderService {
   // PICKUP ORDERS
   // ============================================================
 
+  Future<PickupOrder> getPickupOrderForBottle(
+    int accId,
+    String bottleNumber,
+  ) async {
+    try {
+      final response = await _apiService.dio.get(
+        'api/rider/get_pickup_orders.php',
+        queryParameters: {'accId': accId, 'bottleNumber': bottleNumber},
+      );
+      final body = response.data;
+      if (body is! Map || body['success'] != true) {
+        throw Exception(
+          body is Map
+              ? body['message'] ?? 'Unable to find pickup order.'
+              : 'Invalid pickup response.',
+        );
+      }
+      final rows = body['data'];
+      if (body['matchedBottleNumber'] != bottleNumber) {
+        throw Exception(
+          'Update the mobile API to support pickup by bottle scan.',
+        );
+      }
+      if (rows is! List || rows.length != 1) {
+        throw Exception(
+          'No pending pickup assigned to you was found for this bottle.',
+        );
+      }
+      return PickupOrder.fromJson(Map<String, dynamic>.from(rows.single));
+    } on DioException catch (error) {
+      final body = error.response?.data;
+      throw Exception(
+        body is Map
+            ? body['message'] ?? 'Unable to find pickup order.'
+            : 'Unable to connect to the server.',
+      );
+    }
+  }
+
   Future<List<PickupOrder>> getPickupOrders(int accId) async {
     try {
       final response = await _apiService.dio.get(

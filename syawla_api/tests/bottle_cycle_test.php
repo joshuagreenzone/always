@@ -12,6 +12,9 @@ function rejectCycle(callable $action, string $type = DomainException::class): v
     throw new RuntimeException('Expected the scan to be rejected.');
 }
 $db = (new Database())->connect();
+// Reproduce the former rounding failure deterministically in the last half of
+// a second. Batch timestamps must not round ahead of subsequent physical scans.
+if (in_array('--fractional-clock', $argv, true)) $db->exec('SET timestamp = 1793140000.8');
 $db->beginTransaction();
 try {
     $rider = (int) $db->query("SELECT AccID FROM account_roles WHERE Role = 'RIDER' LIMIT 1")->fetchColumn();
@@ -55,7 +58,7 @@ try {
     rejectCycle(fn() => saveVehicleBatch($db, $rider, 'LOAD', [$number, strtolower($number)]), InvalidArgumentException::class);
     rejectCycle(fn() => saveVehicleBatch($db, $rider, 'LOAD', []), InvalidArgumentException::class);
     // A failed batch must not partially load its valid bottle.
-    rejectCycle(fn() => saveVehicleBatch($db, $rider, 'LOAD', [$number, 'NOT-REGISTERED-' . $token]), OutOfBoundsException::class);
+    rejectCycle(fn() => saveVehicleBatch($db, $rider, 'LOAD', [$number, 'NOT-REGISTERED-' . $token]), InvalidArgumentException::class);
     checkCycle(getBottleCycle($db, $id)['CycleStatus'] === 'READY', 'Invalid batch changed inventory.');
     $eventCount = $db->prepare('SELECT COUNT(*) FROM bottle_scan_event WHERE BottleID = ?');
     $eventCount->execute([$id]);

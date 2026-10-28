@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_colors.dart';
+import '../../models/qr_registration.dart';
 
 /// Shared card spacing for rider scanning workflows.
 class RiderScanCard extends StatelessWidget {
   final List<Widget> children;
-  const RiderScanCard({super.key, required this.children});
+  final Color? color;
+  const RiderScanCard({super.key, required this.children, this.color});
 
   @override
   Widget build(BuildContext context) => Card(
+    color: color,
     margin: EdgeInsets.zero,
     child: Padding(
       padding: const EdgeInsets.all(16),
@@ -46,12 +49,22 @@ class PendingBottleList extends StatelessWidget {
       ...bottles.map(
         (number) => ListTile(
           contentPadding: EdgeInsets.zero,
-          leading: const Icon(
+          tileColor: isUnregisteredQr(number) ? Colors.orange.shade50 : null,
+          leading: Icon(
             Icons.check_circle_outline,
-            color: AppColors.success,
+            color: isUnregisteredQr(number) ? Colors.orange : AppColors.success,
           ),
-          title: Text(number),
-          subtitle: const Text('Ready to confirm'),
+          title: Text(
+            number,
+            style: TextStyle(
+              color: isUnregisteredQr(number) ? Colors.orange.shade900 : null,
+            ),
+          ),
+          subtitle: Text(
+            isUnregisteredQr(number)
+                ? 'Unregistered QR · Ready to confirm'
+                : 'Ready to confirm',
+          ),
           trailing: onRemove == null
               ? null
               : IconButton(

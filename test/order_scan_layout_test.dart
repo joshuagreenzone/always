@@ -96,7 +96,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.byType(RiderScanCard), findsNWidgets(pickup ? 2 : 3));
+        expect(find.byType(RiderScanCard), findsNWidgets(3));
         expect(find.text('Order #42'), findsOneWidget);
         if (pickup) expect(find.text('0 of 3 bottles'), findsOneWidget);
         final confirm = find.widgetWithText(
@@ -105,7 +105,9 @@ void main() {
         );
         expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
         expect(confirm.hitTestable(), findsOneWidget);
-        await tester.ensureVisible(find.byType(BottleScannerView));
+        await tester.ensureVisible(
+          pickup ? find.text('Start Scanning') : find.byType(BottleScannerView),
+        );
         await tester.pumpAndSettle();
         expect(confirm.hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);

@@ -4,8 +4,6 @@ import 'package:intl/intl.dart';
 import '../../models/account.dart';
 import '../../models/rider_transaction.dart';
 import '../../services/rider_transaction_service.dart';
-import 'assigned_orders_screen.dart';
-import 'vehicle_scan_screen.dart';
 
 class TransactionHistoryScreen extends StatefulWidget {
   final int accId;
@@ -142,58 +140,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
         Expanded(child: _buildList()),
       ],
     ),
-    bottomNavigationBar: widget.account == null
-        ? null
-        : Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
-              child: NavigationBar(
-                backgroundColor: Colors.white,
-                surfaceTintColor: Colors.transparent,
-                indicatorColor: const Color(0xFFE3F4FA),
-                selectedIndex: 3,
-                onDestinationSelected: _navigate,
-                destinations: const [
-                  NavigationDestination(
-                    icon: Icon(Icons.home_outlined),
-                    label: 'Home',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.qr_code_scanner),
-                    label: 'Scan',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.receipt_long_outlined),
-                    label: 'Orders',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.history),
-                    label: 'History',
-                  ),
-                ],
-              ),
-            ),
-          ),
   );
-
-  Future<void> _navigate(int index) async {
-    final account = widget.account;
-    if (account == null || index == 3) return;
-    if (index == 0) {
-      Navigator.popUntil(context, (route) => route.isFirst);
-      return;
-    }
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => index == 1
-            ? VehicleScanScreen(account: account, returning: false)
-            : AssignedOrdersScreen(account: account),
-      ),
-    );
-    if (mounted) await _loadTransactions();
-  }
 
   Widget _tab(String label, bool pickups) => FilledButton(
     style: FilledButton.styleFrom(

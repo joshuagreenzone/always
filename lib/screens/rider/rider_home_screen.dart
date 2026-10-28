@@ -12,7 +12,7 @@ import '../login/login_screen.dart';
 import '../refill/refill_screen.dart';
 
 import 'assigned_orders_screen.dart';
-import 'pickup_orders_screen.dart';
+import 'pickup_scan_screen.dart';
 import 'transaction_history_screen.dart';
 import 'vehicle_scan_screen.dart';
 import 'dispenser_scan_screen.dart';
@@ -160,7 +160,7 @@ class RiderHomeScreen extends StatelessWidget {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => PickupOrdersScreen(account: account),
+                        builder: (_) => PickupScanScreen(account: account),
                       ),
                     );
                   },
@@ -302,7 +302,7 @@ class _HeroHeaderState extends State<_HeroHeader>
               ),
               child: Container(
                 height: 310,
-                color: const Color(0xFF0284C7).withOpacity(0.35),
+                color: const Color(0xFF0284C7).withValues(alpha: 0.35),
               ),
             ),
 
@@ -338,7 +338,9 @@ class _HeroHeaderState extends State<_HeroHeader>
                           alignment: Alignment.centerRight,
                           child: IconButton(
                             style: IconButton.styleFrom(
-                              backgroundColor: Colors.white.withOpacity(0.18),
+                              backgroundColor: Colors.white.withValues(
+                                alpha: 0.18,
+                              ),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -365,7 +367,7 @@ class _HeroHeaderState extends State<_HeroHeader>
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.22),
+                                color: Colors.black.withValues(alpha: 0.22),
                                 blurRadius: 18,
                                 offset: const Offset(0, 8),
                               ),
@@ -401,7 +403,7 @@ class _HeroHeaderState extends State<_HeroHeader>
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
+                            color: Colors.white.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(
                               AppSizes.radiusPill,
                             ),
@@ -495,10 +497,10 @@ class _DashboardCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: iconColor.withOpacity(0.3), width: 1.2),
+        border: Border.all(color: iconColor.withValues(alpha: 0.3), width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: iconColor.withOpacity(0.12),
+            color: iconColor.withValues(alpha: 0.12),
             blurRadius: 16,
             spreadRadius: 0,
             offset: const Offset(0, 6),
@@ -518,7 +520,7 @@ class _DashboardCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: iconColor.withOpacity(0.12),
+                    color: iconColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(icon, color: iconColor, size: 26),

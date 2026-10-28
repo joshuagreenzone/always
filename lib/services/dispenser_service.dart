@@ -70,8 +70,8 @@ class DispenserService {
       'accId': accId,
       'dispenserNumber': dispenserNumber,
       'eventType': eventType,
-      if (customerId != null) 'customerId': customerId,
-      if (jumpReason != null) 'jumpReason': jumpReason,
+      'customerId': ?customerId,
+      'jumpReason': ?jumpReason,
     },
   );
 
@@ -92,7 +92,7 @@ class DispenserService {
       'maintenanceNote': maintenanceNote,
       'workDone': workDone,
       'locationType': locationType,
-      if (customerId != null) 'customerId': customerId,
+      'customerId': ?customerId,
       if (locationNote != null && locationNote.isNotEmpty)
         'locationNote': locationNote,
       if (newPhysicalState != null && newPhysicalState.isNotEmpty)

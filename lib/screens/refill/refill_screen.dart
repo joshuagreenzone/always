@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../services/batch_scan_location.dart';
 import '../../services/scan_lookup_service.dart';
+import '../../widgets/common/unregistered_qr_dialog.dart';
+import '../../models/qr_registration.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 import '../../widgets/common/scan_jump_dialog.dart';
 
@@ -83,7 +85,13 @@ class _RefillScreenState extends State<RefillScreen> {
 
     try {
       final results = await Future.wait<Object>([
-        _lookup.get(widget.account.accId, number, 'REFILL_SCAN'),
+        lookupBottleForScan(
+          context,
+          _lookup,
+          widget.account.accId,
+          number,
+          'REFILL_SCAN',
+        ),
         _batchLocation.get(),
       ]);
       if (!mounted) return;
@@ -99,7 +107,16 @@ class _RefillScreenState extends State<RefillScreen> {
         setState(() => _errorMessage = 'Bottle not added');
         return;
       }
-      final bottle = await _refillService.verifyBottle(number);
+      final bottle = lookup.isNewUnregistered
+          ? Bottle(
+              bottleId: 0,
+              bottleNumber: number,
+              bottleTypeId: lookup.transition['bottleTypeId'] as int,
+              bottleType: lookup.transition['bottleType'] as String,
+              price: (lookup.transition['price'] as num).toDouble(),
+              bottleRegDateTime: DateTime.now(),
+            )
+          : await _refillService.verifyBottle(number);
 
       if (!mounted) return;
       final transition = await checkScanJump(
@@ -642,6 +659,9 @@ class _RefillScreenState extends State<RefillScreen> {
                     (bottle) => Padding(
                       padding: const EdgeInsets.only(bottom: 10),
                       child: RiderScanCard(
+                        color: isUnregisteredQr(bottle.bottleNumber)
+                            ? Colors.orange.shade50
+                            : null,
                         children: [
                           Row(
                             children: [
@@ -664,13 +684,21 @@ class _RefillScreenState extends State<RefillScreen> {
                                   children: [
                                     Text(
                                       bottle.bottleNumber,
-                                      style: const TextStyle(
+                                      style: TextStyle(
+                                        color:
+                                            isUnregisteredQr(
+                                              bottle.bottleNumber,
+                                            )
+                                            ? Colors.orange.shade900
+                                            : null,
                                         fontWeight: FontWeight.w700,
                                       ),
                                     ),
                                     const SizedBox(height: 3),
                                     Text(
-                                      '${bottle.bottleType} · ₱${bottle.price.toStringAsFixed(2)}',
+                                      bottle.bottleTypeId == 0
+                                          ? 'Unregistered QR'
+                                          : '${isUnregisteredQr(bottle.bottleNumber) ? 'Unregistered QR · ' : ''}${bottle.bottleType} · ₱${bottle.price.toStringAsFixed(2)}',
                                       style: const TextStyle(
                                         color: Color(0xFF64748B),
                                         fontSize: 12,

@@ -4,6 +4,7 @@ header('Content-Type: application/json');
 
 require_once '../../config/database.php';
 require_once __DIR__ . '/../../services/account_roles.php';
+require_once __DIR__ . '/../../services/bottle_registration_number.php';
 
 function respond(
     bool $success,
@@ -264,6 +265,12 @@ try {
 
     $requestedBottleTypeName =
         $requestedBottleType['BottleType'];
+
+    foreach ($cleanBottleNumbers as $bottleNumber) {
+        if (!isRegistrationBottleNumber($bottleNumber, (string) $requestedBottleType['BottlePrefix'])) {
+            respond(false, 'Invalid bottle number: ' . $bottleNumber . '. Use ' . trim($requestedBottleType['BottlePrefix']) . '-0000 or A-0000 (legacy QR), with exactly four digits.', 400);
+        }
+    }
 
     // ---------------------------------------------------------
     // Find bottles that already exist.

@@ -101,6 +101,15 @@ final class DispenserWorkflow
         $this->db->beginTransaction();
         try {
             $d = $this->dispenser($number, true);
+            $assignment = null;
+            if (in_array($event, ['LOAD_SCAN','DELIVERY_SCAN'], true)) {
+                $borrow = $this->one("SELECT BorrowingID FROM dispenser_borrowing WHERE ActiveDispenserID=? AND Status='RESERVED' FOR UPDATE", [$d['DispenserID']]);
+                if (!$borrow) throw new DomainException('Reserve this dispenser through Orders and assign a rider before loading or delivery.');
+                $assignment = $this->one("SELECT AssignmentID,RiderAccID,Status FROM dispenser_delivery_assignment WHERE BorrowingID=? AND Status IN ('ASSIGNED','OUT_FOR_DELIVERY') ORDER BY AssignmentID DESC LIMIT 1 FOR UPDATE", [$borrow['BorrowingID']]);
+                if (!$assignment) throw new DomainException('Assign an active dispenser delivery to a rider before scanning.');
+                if ((int)$assignment['RiderAccID'] !== $actor) throw new DomainException('This dispenser delivery is assigned to another rider. Ask the dispatcher to reassign it.');
+            }
+
             if ($d['PhysicalState'] === 'MISSING' ||
                 (in_array($event, ['LOAD_SCAN', 'DELIVERY_SCAN'], true) && $d['PhysicalState'] !== 'HEALTHY')) {
                 throw new DomainException('This dispenser is not healthy and available for deployment.');
@@ -121,6 +130,10 @@ final class DispenserWorkflow
             } else {
                 $customer = $customer ?: (int) $d['CurrentCustomerID'];
                 if ($customer > 0 && !$this->one('SELECT 1 FROM customers WHERE CustomerID = ?', [$customer])) throw new InvalidArgumentException('Select a valid customer.');
+            }
+            if ($event === 'DELIVERY_SCAN') {
+                $reserved = $this->one("SELECT CustomerID FROM dispenser_borrowing WHERE BorrowingID=?",[$borrow['BorrowingID']]);
+                if ((int)$reserved['CustomerID'] !== $customer) throw new DomainException('This dispenser is reserved for a different customer.');
             }
             $this->db->prepare('INSERT INTO dispenser_scan_event (DispenserID, AccID, EventType, CustomerID, PreviousScanEventID, ExpectedPreviousEventType, IsCycleJump, JumpReason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
                 ->execute([$d['DispenserID'], $actor, $event, $customer ?: null, $previous['ScanEventID'] ?? null,
@@ -148,6 +161,18 @@ final class DispenserWorkflow
             $newActor = in_array($event, ['LOAD_SCAN', 'PICKUP_SCAN'], true) ? $actor : null;
             $this->db->prepare('UPDATE dispensers SET LifecycleStatus = ?, CurrentCustomerID = ?, CurrentAccID = ? WHERE DispenserID = ?')
                 ->execute([$steps[$event][1], $newCustomer, $newActor, $d['DispenserID']]);
+            if ($event === 'DELIVERY_SCAN') {
+                $this->db->prepare("UPDATE dispenser_borrowing SET Status='ACTIVE',DeliveredAt=NOW(6) WHERE BorrowingID=?")->execute([$borrow['BorrowingID']]);
+            } elseif ($event === 'PICKUP_SCAN') {
+                $this->db->prepare("UPDATE dispenser_borrowing SET Status='PICKED_UP',PickedUpAt=NOW(6) WHERE ActiveDispenserID=? AND Status='ACTIVE'")->execute([$d['DispenserID']]);
+            } elseif ($event === 'RETURN_SCAN') {
+                $this->db->prepare("UPDATE dispenser_borrowing SET Status='RETURNED',ActiveDispenserID=NULL,PickedUpAt=COALESCE(PickedUpAt,NOW(6)),ReturnedAt=NOW(6) WHERE ActiveDispenserID=?")->execute([$d['DispenserID']]);
+            }
+            if ($assignment) {
+                $status = $event === 'LOAD_SCAN' ? 'OUT_FOR_DELIVERY' : 'DELIVERED';
+                $this->db->prepare("UPDATE dispenser_delivery_assignment SET Status=?,OutForDeliveryAt=COALESCE(OutForDeliveryAt,NOW(6)),CompletedAt=CASE WHEN ?='DELIVERED' THEN NOW(6) ELSE NULL END,UpdatedByAccID=?,UpdatedAt=NOW(6) WHERE AssignmentID=?")
+                    ->execute([$status,$status,$actor,$assignment['AssignmentID']]);
+            }
             $this->db->commit();
             return ['dispenserNumber' => $number, 'lifecycleStatus' => $steps[$event][1], 'isCycleJump' => $jump,
                 'scanEventId' => $scanId, 'customerId' => $newCustomer];

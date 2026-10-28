@@ -247,3 +247,73 @@ Validation:
 - All three affected assignment and rider-role widget tests passed.
 - PHP syntax check passed for dispenser_workflow.php.
 - Camera scanning, customer changes, and maintenance require device/API checks.
+
+Task Completed: Promos with Multiple Bottle Types
+Date: 2026-10-24
+
+- Updated the syawlaweb/alwaysweb admin promo form to select multiple bottle
+  types for one offer, such as 1 bottle for PHP 35 for either selected type.
+- Added promo_bottle_types and backfilled existing promos in the syawla database.
+- Updated promo lists, editing, and order validation for multiple types.
+- Preserved historical order prices and existing single-type API input.
+- Added tests/promo_multi_type_test.php in the admin project.
+
+Validation:
+- Multi-type pricing, list/order options, edits, invalid selections, legacy
+  input, and deletion checks passed; fixtures were rolled back.
+- PHP and JavaScript syntax and whitespace checks passed.
+- Backed up admin files and database before applying the migration.
+- Browser interaction still requires manual verification.
+
+Follow-up Completed: Promo Bottle Type Checklist
+Date: 2026-10-24
+
+Reverted at the user's request on 2026-10-24. Restored the previous multi-select
+form, JavaScript, and styling; multiple-type promo support remains.
+
+- Replaced the promo bottle type multi-select with labelled checkboxes.
+- Editing restores checked types; saving submits all checked type IDs and
+  requires at least one selection. New promos reset the checklist.
+- Added clickable option rows, checked styling, and keyboard focus support.
+- PHP/JavaScript syntax and whitespace checks passed.
+- Browser interaction still requires manual verification.
+
+Task Completed: Scan-First Pickup Screen
+Date: 2026-10-24
+
+- Pickup Bottles opens the scanner directly instead of an order list.
+- Matched the loading screen header, scanner card, manual entry, pending batch,
+  and fixed confirmation button.
+- The first bottle identifies its latest assigned pickup delivery and displays
+  order/customer details, bottle types, progress, and balance below the scanner.
+- Further scans must match that delivery. Clearing the batch allows a new order.
+- Preserved GPS reuse, condition/jump checks, partial pickup, and payment flows.
+- Added bottle-number lookup to the local and active mobile pickup-order APIs.
+- Eight targeted Flutter workflow/layout/role/location tests passed.
+- API checks passed using temporary tables without changing live records.
+- PHP syntax and whitespace checks passed. Phone camera/GPS, confirmation,
+  and payment flows still require device verification.
+
+Task Completed: Bottle Registration Prefix and Number Validation
+Date: 2026-10-24
+
+- Read BottlePrefix from the selected bottle type and show its required format.
+- Accept only the exact configured prefix, a hyphen, and four ASCII digits
+  (for example, A-0000, SG-0001, or RG-0001 for their respective types).
+- Reject invalid QR values before condition lookup or adding them to the batch.
+- Changing bottle type removes pending scans incompatible with its prefix.
+- Enforced the same rule in single and batch registration APIs, including the
+  active gitlabCodes/alwaysweb mobile API. Existing bottle records are unchanged.
+- Ten targeted Flutter tests passed, including scanner rejection and ownership.
+- PHP format tests, syntax checks, and whitespace checks passed; targeted
+  static analysis found no issues. Camera behavior still needs phone verification.
+
+Follow-up: Legacy A-Code Registration
+Date: 2026-10-24
+
+- Legacy A-0000-format QRs can be registered as either Slim or Round, using the
+  selected bottle type. The A prefix does not determine the bottle type.
+- Accept legacy A plus hyphen/four digits alongside each type's own prefix.
+- Updated scanner hints and both registration APIs, including the active API.
+- Eleven Flutter tests, PHP checks, and static analysis passed. This supersedes
+  the earlier requirement that every QR match the selected type's prefix.

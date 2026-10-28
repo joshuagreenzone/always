@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/bottle_condition.php';
 require_once __DIR__ . '/scan_transition.php';
+require_once __DIR__ . '/load_trip.php';
 
 const BOTTLE_CYCLE_LABELS = [
     'READY' => 'Ready for Loading', 'LOADED' => 'Loaded for Delivery',
@@ -104,6 +105,10 @@ function verifyVehicleBottle(PDO $db, int $accId, string $number, string $action
         throw new InvalidArgumentException('Invalid scanning process.');
     }
     $bottle = getBottleCondition($db, $number, $db->inTransaction());
+    if (!$bottle && !$db->inTransaction()) {
+        $bottle = unregisteredQrPreview($number);
+        if ($bottle) return $bottle + ['cycle' => null];
+    }
     if (!$bottle) throw new OutOfBoundsException('Bottle not found.');
     $id = $bottle['bottleId'];
     if ($action === 'DELIVERY') {
@@ -120,6 +125,9 @@ function verifyVehicleBottle(PDO $db, int $accId, string $number, string $action
     requireHealthyBottle($db, $id, $action === 'RETURN');
     $cycle = getBottleCycle($db, $id);
     if ($allowCycleJump) {
+        if ($action === 'LOAD' && $cycle && $cycle['CycleStatus'] === 'LOADED' && (int) $cycle['AccID'] !== $accId) {
+            throw new BottleConditionConflict('This bottle is loaded by another rider.');
+        }
         if ($action === 'RETURN' && $cycle && $cycle['CycleStatus'] === 'COLLECTED') {
             if ((int) $cycle['AccID'] !== $accId) {
                 throw new BottleConditionConflict("Bottle {$number} was picked up by another rider. That rider must confirm its return to the station.");
@@ -160,7 +168,7 @@ function verifyVehicleBottle(PDO $db, int $accId, string $number, string $action
     return $bottle + ['cycle' => $cycle];
 }
 
-function saveVehicleBatch(PDO $db, int $accId, string $action, array $numbers, array $jumpDetails = []): array
+function saveVehicleBatch(PDO $db, int $accId, string $action, array $numbers, array $jumpDetails = [], ?array $loadContext = null, ?string $requestKey = null): array
 {
     if (!$db->inTransaction()) throw new LogicException('Vehicle scans require a transaction.');
     requireCycleRider($db, $accId);
@@ -174,20 +182,63 @@ function saveVehicleBatch(PDO $db, int $accId, string $action, array $numbers, a
         if (isset($normalized[$key])) throw new InvalidArgumentException('A bottle was scanned more than once.');
         $normalized[$key] = trim($number);
     }
-    // Consistent lock order for concurrent batches. Validation precedes all writes.
+    // Consistent lock order; the caller rolls back every failed batch validation.
     ksort($normalized);
+    $carried = [];
+    $requestHash = hash('sha256', json_encode([$action, $normalized, $jumpDetails, $loadContext], JSON_THROW_ON_ERROR));
+    if ($requestKey !== null && !preg_match('/\A[a-zA-Z0-9-]{16,64}\z/', $requestKey)) {
+        throw new InvalidArgumentException('Invalid batch request key.');
+    }
+    // Serializes numbering and concurrent new trips for this rider. Lock this
+    // before bottles; the HTTP endpoint uses READ COMMITTED for fresh history.
+    $lock = $db->prepare('SELECT AccID FROM accounts WHERE AccID = ? FOR UPDATE');
+    $lock->execute([$accId]);
+    if ($requestKey !== null) {
+        $stmt = $db->prepare('SELECT RequestHash, SavedResult FROM vehicle_scan_batch WHERE AccID = ? AND RequestKey = ? FOR UPDATE');
+        $stmt->execute([$accId, $requestKey]);
+        if ($saved = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if ($saved['RequestHash'] !== $requestHash) throw new DomainException('This saved batch request was changed. Reopen loading before starting another trip.');
+            return json_decode($saved['SavedResult'], true, 512, JSON_THROW_ON_ERROR);
+        }
+    }
+    if ($action === 'LOAD' && $loadContext !== null) {
+        $current = getLoadContext($db, $accId);
+        // Lock all current and newly scanned bottles in one consistent order.
+        $lockNumbers = $normalized;
+        foreach ($current['bottles'] as $b) $lockNumbers[strtolower($b['bottleNumber'])] = $b['bottleNumber'];
+        ksort($lockNumbers);
+        $lock = $db->prepare('SELECT BottleID FROM bottles WHERE BottleNumber = ? FOR UPDATE');
+        foreach ($lockNumbers as $n) $lock->execute([$n]);
+        $current = getLoadContext($db, $accId);
+        if ($current != $loadContext) throw new DomainException('Your previous batch or undelivered bottles changed. Reopen Load for Delivery to review and confirm them again.');
+        foreach ($current['bottles'] as $b) {
+            $key = strtolower($b['bottleNumber']);
+            if (!isset($normalized[$key])) throw new DomainException('All confirmed carry-over bottles must remain in the new batch.');
+            $carried[$key] = $b;
+        }
+    }
     $verified = [];
     $eventType = $action === 'LOAD' ? 'LOAD_SCAN' : 'UNLOAD_SCAN';
     foreach ($normalized as $number) {
+        saveUnregisteredQr($db, $number, $accId, (int) ($jumpDetails[strtolower($number)]['bottleTypeId'] ?? 0));
         $bottle = verifyVehicleBottle($db, $accId, $number, $action, true);
+        if (isset($carried[strtolower($number)])) {
+            // Membership only: this is not another physical loading scan.
+            $verified[] = $bottle + ['carryOver' => true, 'sourceBatchId' => $carried[strtolower($number)]['sourceBatchId']];
+            continue;
+        }
         $details = $jumpDetails[strtolower($number)] ?? [];
         $transition = requireScanTransition($db, $bottle['bottleId'], $eventType,
             $details['jumpReason'] ?? null,
             array_key_exists('previousScanEventId', $details) ? ($details['previousScanEventId'] ?? 0) : null);
         $verified[] = $bottle + ['transition' => $transition];
     }
-    $stmt = $db->prepare('INSERT INTO vehicle_scan_batch (AccID, Action, BottleCount) VALUES (?, ?, ?)');
-    $stmt->execute([$accId, $action, count($verified)]);
+    [$tripDate, $tripNumber, $batchCode] = $action === 'LOAD' ? nextLoadTrip($db, $accId) : [null, null, null];
+    // Whole-second loading times match existing physical scan writers. Passing
+    // datetime(6) to datetime previously rounded loads into the next second.
+    $stmt = $db->prepare('INSERT INTO vehicle_scan_batch (AccID, Action, BottleCount, ScannedAt, TripDate, TripNumber, BatchCode, RequestKey, RequestHash)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)');
+    $stmt->execute([$accId, $action, count($verified), $tripDate, $tripNumber, $batchCode, $requestKey, $requestHash]);
     $batchId = (int) $db->lastInsertId();
     $eventStmt = $db->prepare('INSERT INTO bottle_scan_event
         (BottleID, AccID, EventType, RefillID, ODTID, DPTID, OrderID, DeliveryID, PickUpID,
@@ -199,10 +250,11 @@ function saveVehicleBatch(PDO $db, int $accId, string $action, array $numbers, a
         INNER JOIN delivery d ON d.DeliveryID = p.DeliveryID WHERE dpt.DPTID = ?');
     $deliveryStmt = $db->prepare('SELECT odt.OrderID, odt.DeliveryID
         FROM order_delivery_transaction odt WHERE odt.ODTID = ? AND odt.BottleID = ?');
-    $stmt = $db->prepare('INSERT INTO vehicle_bottle_scan (BatchID, BottleID, RefillID, DPTID) VALUES (?, ?, ?, ?)');
+    $stmt = $db->prepare('INSERT INTO vehicle_bottle_scan (BatchID, BottleID, RefillID, DPTID, SourceBatchID, IsCarryOver) VALUES (?, ?, ?, ?, ?, ?)');
     foreach ($verified as $bottle) {
         $cycle = $bottle['cycle'];
-        $stmt->execute([$batchId, $bottle['bottleId'], $cycle['RefillID'] ?? null, $action === 'RETURN' ? ($cycle['DPTID'] ?? null) : null]);
+        $stmt->execute([$batchId, $bottle['bottleId'], $cycle['RefillID'] ?? null, $action === 'RETURN' ? ($cycle['DPTID'] ?? null) : null, $bottle['sourceBatchId'] ?? null, (int) !empty($bottle['carryOver'])]);
+        if (!empty($bottle['carryOver'])) continue;
         $pickup = null;
         if ($action === 'RETURN' && !empty($cycle['DPTID'])) {
             $pickupStmt->execute([$cycle['DPTID']]);
@@ -226,5 +278,10 @@ function saveVehicleBatch(PDO $db, int $accId, string $action, array $numbers, a
         setBottleCycle($db, $bottle['bottleId'], $action === 'LOAD' ? 'LOADED' : 'RETURNED', $accId,
             $cycle['RefillID'] ?? null, $cycle['ODTID'] ?? null, $cycle['DPTID'] ?? null);
     }
-    return ['batchId' => $batchId, 'count' => count($verified), 'status' => $action === 'LOAD' ? 'LOADED' : 'RETURNED'];
+    $result = ['batchId' => $batchId, 'batchCode' => $batchCode, 'tripNumber' => $tripNumber,
+        'count' => count($verified), 'carriedCount' => count($carried), 'newCount' => count($verified) - count($carried),
+        'status' => $action === 'LOAD' ? 'LOADED' : 'RETURNED'];
+    $db->prepare('UPDATE vehicle_scan_batch SET SavedResult = ? WHERE BatchID = ?')
+        ->execute([json_encode($result, JSON_THROW_ON_ERROR), $batchId]);
+    return $result;
 }

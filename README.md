@@ -21,6 +21,19 @@ on later bottle, refill, and rider requests. Logging out clears it.
 Android debug builds permit HTTP for local XAMPP testing. A deployed app should
 use an HTTPS backend URL.
 
+## Switching between local and hosted APIs
+
+The active default is configured in `lib/services/api_service.dart`. The local
+CodeIgniter API uses `http://192.168.1.76/alwaysweb-ci4/mobile/` and connects to
+the local MySQL `always` database through the Alwaysweb backend configuration.
+The phone and XAMPP computer must be on the same Wi-Fi, with Apache and MySQL running.
+
+The hosted URL `https://always-system.greenzoneph.com/mobile/` is kept commented
+beside the local URL. To switch back, comment the local `defaultValue` line and
+uncomment the hosted line, then stop and rebuild the app. A
+`--dart-define=SYAWLA_API_BASE_URL=...` build option overrides either default;
+remove any old hosted override when running locally.
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

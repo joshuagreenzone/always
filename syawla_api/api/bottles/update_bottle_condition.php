@@ -26,10 +26,11 @@ try {
     if ($accId <= 0 || $number === '' || strlen($number) > 200) {
         throw new InvalidArgumentException('Account ID and bottle number are required.');
     }
+    if (!is_array($input['repairSupplyIds'] ?? [])) throw new InvalidArgumentException('Choose valid replacement parts.');
     $db = (new Database())->connect();
     $db->beginTransaction();
     $bottle = updateBottleCondition(
-        $db, $accId, $number, $input['expectedCondition'], $input['condition'], $input['note']
+        $db, $accId, $number, $input['expectedCondition'], $input['condition'], $input['note'], $input['repairSupplyIds'] ?? []
     );
     $db->commit();
     echo json_encode(['success' => true, 'message' => 'Bottle state updated.', 'data' => $bottle]);
@@ -40,7 +41,7 @@ try {
     $status = $e instanceof InvalidArgumentException ? 400
         : ($e instanceof UnexpectedValueException ? 403
         : ($e instanceof OutOfBoundsException ? 404
-        : ($e instanceof BottleConditionConflict ? 409 : 500)));
+        : ($e instanceof DomainException ? 409 : 500)));
     http_response_code($status);
     if ($status === 500) {
         error_log('Bottle state update: ' . $e->getMessage());

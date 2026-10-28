@@ -7,7 +7,13 @@ class ScanLookup {
   final BottleCondition condition;
   final Map<String, dynamic> transition;
   final Map<String, dynamic>? vehicle;
-  const ScanLookup(this.condition, this.transition, {this.vehicle});
+  final bool isNewUnregistered;
+  const ScanLookup(
+    this.condition,
+    this.transition, {
+    this.vehicle,
+    this.isNewUnregistered = false,
+  });
 }
 
 /// One read-only request for a bottle's condition and expected scan step.
@@ -42,6 +48,7 @@ class ScanLookupService {
       return ScanLookup(
         BottleCondition.fromJson(data),
         Map<String, dynamic>.from(data['transition']),
+        isNewUnregistered: data['isNewUnregistered'] == true,
         vehicle: data['vehicle'] is Map
             ? Map<String, dynamic>.from(data['vehicle'])
             : null,

@@ -8,10 +8,10 @@ try {
     $db = (new Database())->connect();
     // Ready stock is the current confirmed refill cycle, not a historical refill.
     $stmt = $db->query("SELECT r.RefillID, r.BottleID, r.RefillDateTime,
-        b.BottleNumber, b.BottleTypeID, bt.BottleType, bt.Price
+        b.BottleNumber, b.BottleTypeID, COALESCE(bt.BottleType, 'Unregistered QR') AS BottleType, COALESCE(bt.Price, 0) AS Price
         FROM (" . bottleCurrentCycleSql() . ") c INNER JOIN bottles b ON b.BottleID = c.BottleID
         INNER JOIN refill r ON r.RefillID = c.RefillID AND r.BottleID = c.BottleID
-        INNER JOIN bottle_types bt ON bt.BottleTypeID = b.BottleTypeID
+        LEFT JOIN bottle_types bt ON bt.BottleTypeID = b.BottleTypeID
         WHERE c.CycleStatus = 'READY' AND b.BottleCondition = 'HEALTHY'
         AND NOT EXISTS (SELECT 1 FROM bottle_condition_history h
             WHERE h.BottleID = b.BottleID AND h.NewCondition = 'HEALTHY'

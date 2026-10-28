@@ -30,7 +30,9 @@ class _ConditionService extends BottleConditionService {
     required BottleCondition bottle,
     required String condition,
     required String note,
+    List<int> repairSupplyIds = const [],
   }) async {
+    selectedRepairParts = List<int>.from(repairSupplyIds);
     updates++;
     lastCondition = condition;
     lastNote = note.trim();
@@ -40,10 +42,13 @@ class _ConditionService extends BottleConditionService {
       bottleNumber: bottle.bottleNumber,
       condition: condition,
       note: note.trim(),
+      partsUsed: repairSupplyIds.length,
       updatedAt: DateTime(2026, 10, 12, 14, 30),
       needsRefillAfterRecovery: needsRecoveryRefill,
     );
   }
+
+  List<int> selectedRepairParts = [];
 }
 
 Future<void> _openScannerCheck(
@@ -88,6 +93,54 @@ Future<void> _openScannerCheck(
 }
 
 void main() {
+  testWidgets(
+    'restoring Healthy records selected hardware and disables empty stock',
+    (tester) async {
+      final service = _ConditionService(
+        const BottleCondition(
+          bottleNumber: 'RG-0001',
+          condition: 'DAMAGED',
+          repairParts: [
+            BottleRepairPart(supplyId: 5, name: 'Slim cap', quantityOnHand: 4),
+            BottleRepairPart(
+              supplyId: 6,
+              name: 'Slim spigot',
+              quantityOnHand: 3,
+            ),
+            BottleRepairPart(
+              supplyId: 8,
+              name: 'Out-of-stock spare',
+              quantityOnHand: 0,
+            ),
+          ],
+        ),
+      );
+      await _openScannerCheck(tester, service, (_) {});
+      expect(
+        tester
+            .widget<CheckboxListTile>(
+              find.widgetWithText(CheckboxListTile, 'Out-of-stock spare'),
+            )
+            .onChanged,
+        isNull,
+      );
+      await tester.ensureVisible(find.text('Slim cap'));
+      await tester.tap(find.text('Slim cap'));
+      await tester.pump();
+      await tester.ensureVisible(find.text('Slim spigot'));
+      await tester.tap(find.text('Slim spigot'));
+      await tester.pump();
+      await tester.enterText(
+        find.byType(TextFormField),
+        'Replaced cracked cap',
+      );
+      await tester.ensureVisible(find.text('Save condition'));
+      await tester.tap(find.text('Save condition'));
+      await tester.pumpAndSettle();
+      expect(service.selectedRepairParts, [5, 6]);
+      expect(find.text('Replacement parts used: 2 piece(s).'), findsOneWidget);
+    },
+  );
   testWidgets(
     'Delivery rejects a healthy bottle still needing recovery refill',
     (tester) async {
@@ -217,6 +270,10 @@ void main() {
       );
       await _openScannerCheck(tester, service, (_) {});
       expect(find.text('Bottle condition'), findsOneWidget);
+      expect(
+        find.text('Caps or spigots used (optional)'),
+        state == 'DAMAGED' ? findsOneWidget : findsNothing,
+      );
       await tester.tap(find.text('Save condition'));
       await tester.pumpAndSettle();
       expect(find.text('Enter a note before saving.'), findsOneWidget);

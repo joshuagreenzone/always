@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 
 import '../../models/account.dart';
+import '../../models/bottle_type.dart';
 import '../../widgets/common/bottle_condition_dialog.dart';
 import '../../widgets/common/bottle_scanner_view.dart';
 
 class BottleRegistrationScanScreen extends StatefulWidget {
   final Future<bool> Function(String value) onScanned;
   final Account account;
+  final BottleType bottleType;
   const BottleRegistrationScanScreen({
     super.key,
     required this.onScanned,
     required this.account,
+    required this.bottleType,
   });
   @override
   State<BottleRegistrationScanScreen> createState() =>
@@ -46,7 +49,16 @@ class _BottleRegistrationScanScreenState
         success: _success,
         busy: _busy,
         onDetect: (capture) async {
-          final value = capture.barcodes.first.rawValue!.trim();
+          if (_busy || capture.barcodes.isEmpty) return;
+          final value = capture.barcodes.first.rawValue?.trim() ?? '';
+          if (!widget.bottleType.acceptsNumber(value)) {
+            setState(() {
+              _success = false;
+              _message =
+                  'Invalid bottle number. Use ${widget.bottleType.acceptedNumberExamples}. Each number needs a hyphen and four digits.';
+            });
+            return;
+          }
           if (_accepted.contains(value.toLowerCase())) return;
           setState(() => _busy = true);
           try {
@@ -67,11 +79,12 @@ class _BottleRegistrationScanScreenState
                   : 'Bottle not added\n$value';
             });
           } catch (e) {
-            if (mounted)
+            if (mounted) {
               setState(() {
                 _success = false;
                 _message = e.toString().replaceFirst('Exception: ', '');
               });
+            }
           } finally {
             if (mounted) setState(() => _busy = false);
           }

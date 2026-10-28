@@ -25,7 +25,7 @@ class Bottle {
       bottleOwner: json['BottleOwner']?.toString() ?? 'COMPANY',
       bottleId: int.parse(json['BottleID'].toString()),
       bottleNumber: json['BottleNumber'].toString(),
-      bottleTypeId: int.parse(json['BottleTypeID'].toString()),
+      bottleTypeId: int.tryParse(json['BottleTypeID'].toString()) ?? 0,
       bottleType: json['BottleType'].toString(),
       price: double.parse(json['Price'].toString()),
       bottleRegDateTime: DateTime.parse(json['BottleRegDateTime'].toString()),

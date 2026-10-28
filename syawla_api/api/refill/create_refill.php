@@ -108,16 +108,17 @@ try {
         $saved = [];
 
         foreach ($bottleNumbers as $bottleNumber) {
+            saveUnregisteredQr($db, $bottleNumber, $accId, (int) ($jumpDetails[strtolower($bottleNumber)]['bottleTypeId'] ?? 0));
             // Lock the bottle record during validation and saving.
             $stmt = $db->prepare("
                 SELECT
                     b.BottleID,
                     b.BottleNumber,
                     b.BottleTypeID,
-                    bt.BottleType,
-                    bt.Price
+                    COALESCE(bt.BottleType, 'Unregistered QR') AS BottleType,
+                    COALESCE(bt.Price, 0) AS Price
                 FROM bottles b
-                INNER JOIN bottle_types bt
+                LEFT JOIN bottle_types bt
                     ON bt.BottleTypeID = b.BottleTypeID
                 WHERE b.BottleNumber = :bottleNumber
                 LIMIT 1

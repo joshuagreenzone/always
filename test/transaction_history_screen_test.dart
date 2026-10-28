@@ -106,7 +106,7 @@ void main() {
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     await open(tester, HistoryService());
     expect(tester.takeException(), isNull);
-    expect(find.text('History').hitTestable(), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
     await tester.tap(find.text('Order #140'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
